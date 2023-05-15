@@ -1,0 +1,90 @@
+<?xml version="1.0"?>
+<sdf version='1.7'>
+  <model name='racecar'>
+    <link name='base_link'>
+      <inertial>
+        <pose>0.091667 0 0.088867 0 -0 0</pose>
+        <mass>3</mass>
+        <inertia>
+          <ixx>3.03781</ixx>
+          <ixy>0</ixy>
+          <ixz>-0.0209367</ixz>
+          <iyy>3.05911</iyy>
+          <iyz>0</iyz>
+          <izz>3.07953</izz>
+        </inertia>
+      </inertial>
+      <collision name='base_link_collision'>
+        <pose>0.1651 0 0.09 0 -0 0</pose>
+        <geometry>
+          <box>
+            <size>0.3302 0.2032 0.1</size>
+          </box>
+        </geometry>
+      </collision>
+      <collision name='base_link_fixed_joint_lump__back_left_wheel_collision_1'>
+        <pose>0 0.12065 0.0508 1.5708 -0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0381</length>
+            <radius>0.0508</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <collision name='base_link_fixed_joint_lump__back_right_wheel_collision_2'>
+        <pose>0 -0.12065 0.0508 1.5708 -0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0381</length>
+            <radius>0.0508</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <collision name='base_link_fixed_joint_lump__laser_model_collision_3'>
+        <pose>0.275 0 0.165 1.5708 -0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.05</length>
+            <radius>0.026</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name='base_link_visual'>
+        <pose>0.1651 0 0.09 0 -0 0</pose>
+        <geometry>
+          <box>
+            <size>0.3302 0.2032 0.1</size>
+          </box>
+        </geometry>
+      </visual>
+      <visual name='base_link_fixed_joint_lump__back_left_wheel_visual_1'>
+        <pose>0 0.12065 0.0508 1.5708 -0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0381</length>
+            <radius>0.0508</radius>
+          </cylinder>
+        </geometry>
+      </visual>
+      <visual name='base_link_fixed_joint_lump__back_right_wheel_visual_2'>
+        <pose>0 -0.12065 0.0508 1.5708 -0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0381</length>
+            <radius>0.0508</radius>
+          </cylinder>
+        </geometry>
+      </visual>
+      <visual name='base_link_fixed_joint_lump__laser_model_visual_3'>
+        <pose>0.275 0 0.165 1.5708 -0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.05</length>
+            <radius>0.026</radius>
+          </cylinder>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>
+

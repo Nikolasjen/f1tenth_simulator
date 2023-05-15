@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Launch Gazebo with your world -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find f1tenth_simulator)/worlds/porto.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <!-- Spawn your robot -->
+  <param name="robot_description" command="$(find xacro)/xacro '$(find f1tenth_simulator)/racecar.xacro'" />
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" >
+    <param name="publish_frequency" type="double" value="50.0" />
+    <param name="tf_prefix" type="string" value="" />
+  </node>
+
+  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-param robot_description -urdf -model my_robot -x 1 -y 1.5 -z 0.1 -Y 1" />
+</launch>
+
+  
+  <!-- Spawn your robot 
+  <param name="robot_description" command="$(find xacro)/xacro '$(find f1tenth_simulator)/urdf/f1tenth_car.urdf'" />
+
+
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" >
+    <param name="publish_frequency" type="double" value="50.0" />
+    <param name="tf_prefix" type="string" value="" />
+  </node>
+
+  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-param robot_description -urdf -model my_robot -x 1 -y 1.5 -z 0.1 -Y 1" />
+  -->
+
+
