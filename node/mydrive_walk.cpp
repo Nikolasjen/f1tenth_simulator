@@ -11,6 +11,7 @@
 
 
 #include <iostream> // std
+#include <std_msgs/String.h>
 
 // PID + read file
 #include <fstream>
@@ -102,6 +103,9 @@ private:
     double Kd = 0.2;
     double integral = 0.0;
     double prev_error = 0.0;
+
+    // ROS publish lab results to EVO-ALG
+    ros::Publisher results_pub;
 
     // Read CSV file
     string csv_name = "testMapPoints.csv";
@@ -208,11 +212,12 @@ public:
         n = ros::NodeHandle("~");
 
         // get topic names
-        string drive_topic, odom_topic, scan_topic;
+        string drive_topic, odom_topic, scan_topic, results_topic;
         n.getParam("mydrive_drive_topic", drive_topic);
         n.getParam("odom_topic", odom_topic);
         n.getParam("scan_topic", scan_topic);
         n.getParam("scan_field_of_view", scan_field_of_view);
+        n.getParam("simulation_results", results_topic);
 
         // get car parameters
         n.getParam("max_speed", max_speed);
@@ -245,6 +250,9 @@ public:
         // Start a subscriber to listen to scan messages
         scan_sub = n.subscribe(scan_topic, 1, &MydriveWalker::laser_callback, this);
         starting_time = ros::Time::now();
+        
+        // Start publisher for lab results
+        results_pub = n.advertise<std_msgs::String>(results_topic, 1000);
     }
 
 // --------------------------------------------------------------------------------------------------------------
@@ -328,7 +336,11 @@ public:
                 cout << "meh Total... m: " << round(meh_total.toSec()/60) << ", s: " << meh_total.toSec() - (round(meh_total.toSec()/60) * 60) << endl;
                 cout << "meh Lab...   m: " << round(meh_lab.toSec()/60) << ", s: " << meh_lab.toSec() - (round(meh_lab.toSec()/60) * 60) << endl;
                 cout << "- - - - - - -" << endl;
-                write_CSV_labs(csv_labs_name, to_string(lab_time.toSec()));
+
+                std_msgs::String msg;
+                msg.data = to_string(lab_time.toSec());
+                results_pub.publish(msg);
+                //write_CSV_labs(csv_labs_name, to_string(lab_time.toSec()));
             }
 
         }

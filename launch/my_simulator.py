@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
 
 import subprocess
 import csv
@@ -7,6 +8,9 @@ import copy
 import time
 import os
 import sys
+import rospy
+from std_msgs.msg import String
+
 
 # Define csv file name
 ORIGINAL_CSV_FILE = "porto_centerline.csv"
@@ -23,6 +27,9 @@ NUMBER_OF_INITIAL_SOLUTIONS = 2
 NUMBER_OF_GENERATIONS = 5
 PERCENTAGE_BEST_SOLUTION = 0.2 # 20%
 solutions = []
+
+def result_callback(msg, namespace):
+    print("Received results from {}: {}".format(namespace, msg.data))
 
 def read_csv_file(file_name):
     script_dir = os.path.dirname(os.path.abspath(__file__))  # Get the absolute path of the directory containing this script
@@ -121,15 +128,30 @@ def mutate_path_points(path_points, mutation_percentage):
         mutated_path_points.append([x + x * mutation_x, y + y * mutation_y])
     return mutated_path_points
 
-def run_simulation(simulation_duration_seconds):
+def run_simulations(simulation_duration_seconds, numberOfSimulations):
     # My command
     command = "roslaunch f1tenth_simulator headless_simulator.launch"
 
     # Define the namespaces and master URIs for each simulation
     simulations = [
-        {"namespace": "sim1", "master_uri": "http://localhost:11311"},
-        {"namespace": "sim2", "master_uri": "http://localhost:11312"},
+        #{"namespace": "sim1", "master_uri": "http://localhost:11311"},
+        #{"namespace": "sim2", "master_uri": "http://localhost:11312"},
     ]
+    for i in range(numberOfSimulations - 1):
+        print("simulation {} has started".format(i))
+        simulations.append({"namespace": "sim{}".format(i), "master_uri": "http://localhost:{}".format(11311 + i)})
+
+    # Create a list to store the subscribers
+    subscribers = []
+
+    # For each simulation, create a separate subscriber
+    for sim in simulations:
+        namespace = sim["namespace"]
+        topic = "{}/simulation_results".format(namespace)
+        subscriber = rospy.Subscriber(topic, String, result_callback, callback_args=namespace)
+        subscribers.append(subscriber)
+
+    
     # Run each simulation in a separate subprocess
     processes = []
     for sim in simulations:
@@ -149,25 +171,28 @@ def run_simulation(simulation_duration_seconds):
     for process in processes:
         process.wait()
 
+    # Spin to keep the script alive
+    rospy.spin()
 
-    # Use subprocess to launch the simulator file in the f1tenth_simulator package
-    simulator_process = None
-    #simulator_process = subprocess.Popen(['roslaunch', 'f1tenth_simulator', 'headless_simulator.launch'])
-    time.sleep(2)  # wait for simulator to launch
-
-    simulator_start_time = time.time()
-    while time.time() - simulator_start_time < simulation_duration_seconds:
-        time.sleep(0.1)
-
-    # Terminate the simulator process
-    if (simulator_process is not None):
-        simulator_process.terminate()
-
-    time.sleep(1.0) # Sleep for 1 seconds to allow simulation to terminate
-    
-    ## Collect times to run a lab
-    labTimes = read_labs_times(LAB_TIMES_CSV_FILE)
-    return labTimes[0]
+    ## Use subprocess to launch the simulator file in the f1tenth_simulator package
+    #simulator_process = None
+    ##simulator_process = subprocess.Popen(['roslaunch', 'f1tenth_simulator', 'headless_simulator.launch'])
+    #time.sleep(2)  # wait for simulator to launch
+#
+    #simulator_start_time = time.time()
+    #while time.time() - simulator_start_time < simulation_duration_seconds:
+    #    time.sleep(0.1)
+#
+    ## Terminate the simulator process
+    #if (simulator_process is not None):
+    #    simulator_process.terminate()
+#
+    #time.sleep(1.0) # Sleep for 1 seconds to allow simulation to terminate
+    #
+    ### Collect times to run a lab
+    #labTimes = read_labs_times(LAB_TIMES_CSV_FILE)
+    #return labTimes[0]
+    return -1
 
 # Define evaluation / fitness function
 def fitness(labTime):
@@ -186,28 +211,29 @@ def evolution():
     # Read path points from csv file
     original_path_points = read_csv_points(ORIGINAL_CSV_FILE)
 
-    # Initial population
-    for _ in range(NUMBER_OF_INITIAL_SOLUTIONS):
-            solutions.append(
-                mutate_path_points(original_path_points, MUTATION_PERCENTAGE)
-            )
+    ## Initial population
+    #for _ in range(NUMBER_OF_INITIAL_SOLUTIONS):
+    #        solutions.append(
+    #            mutate_path_points(original_path_points, MUTATION_PERCENTAGE)
+    #        )
 
     times = []
-    for i in range(NUMBER_OF_GENERATIONS -1):
-        rankedSolutions = []
-        for s_points in solutions:
-            ## run simulation for s
-            # Write mutated path points to csv file
-            write_csv_file(POINTS_DESTINATION_CSV_FILE, s_points)
-            time.sleep(0.1)  # wait for CSV to be written
-
-            labTime = run_simulation(BEST_OUTCOME*2)
-
-            # place calculated fitness and solution in ranking
-            rankedSolutions.append( (fitness(labTime), s_points) )
-
-        rankedSolutions.sort()
-        times.append(rankedSolutions[0][0])
+    times.append(run_simulations(10, 2))
+    #for i in range(NUMBER_OF_GENERATIONS -1):
+    #    rankedSolutions = []
+    #    for s_points in solutions:
+    #        ## run simulation for s
+    #        # Write mutated path points to csv file
+    #        write_csv_file(POINTS_DESTINATION_CSV_FILE, s_points)
+    #        time.sleep(0.1)  # wait for CSV to be written
+#
+    #        labTime = run_simulation(BEST_OUTCOME*2)
+#
+    #        # place calculated fitness and solution in ranking
+    #        rankedSolutions.append( (fitness(labTime), s_points) )
+#
+    #    rankedSolutions.sort()
+    #    times.append(rankedSolutions[0][0])
 
         #for time, coords in rankedSolutions:
         #    times.append(time)
@@ -248,26 +274,30 @@ def evolution():
 
 if __name__ == '__main__':
     try:
-        
+        # Initialize the listener node
+        rospy.init_node('main_script')
+
         # Read path points from csv file
         #original_path_points = read_csv_points(original_csv_file)
         
         random.seed(0) # Set seed for consistent testing...
         #evolution()
-        meh = subprocess.Popen(['roslaunch', 'f1tenth_simulator', 'headless_simulator.launch'], env={"ROS_MASTER_URI": "http://localhost:{}".format(11311+1)})
-        listOfProcesses = []
-        for i in range(3):
-            listOfProcesses.append(
-                1
-            )
+        run_simulations(10, 2)
+
+        #meh = subprocess.Popen(['roslaunch', 'f1tenth_simulator', 'headless_simulator.launch'], env={"ROS_MASTER_URI": "http://localhost:{}".format(11311+1)})
+        #listOfProcesses = []
+        #for i in range(3):
+        #    listOfProcesses.append(
+        #        1
+        #    )
         
 
-        time.sleep(10)
-        for p in listOfProcesses:
-            if (p != 1):
-                p.terminate()
-
-        meh.terminate()
+        #time.sleep(10)
+        #for p in listOfProcesses:
+        #    if (p != 1):
+        #        p.terminate()
+#
+        #meh.terminate()
         
         
         ## Mutate path points
