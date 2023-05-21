@@ -10,7 +10,8 @@ import os
 import sys
 import rospy
 from std_msgs.msg import String
-
+from rosgraph_msgs.msg import Log
+from roslaunch import rosparam
 
 # Define csv file name
 ORIGINAL_CSV_FILE = "porto_centerline.csv"
@@ -29,7 +30,7 @@ PERCENTAGE_BEST_SOLUTION = 0.2 # 20%
 solutions = []
 
 def result_callback(msg, namespace):
-    print("Received results from {}: {}".format(namespace, msg.data))
+    print("Received results from {} finished with result: {}".format(namespace, msg.data))
 
 def read_csv_file(file_name):
     script_dir = os.path.dirname(os.path.abspath(__file__))  # Get the absolute path of the directory containing this script
@@ -129,19 +130,19 @@ def mutate_path_points(path_points, mutation_percentage):
     return mutated_path_points
 
 def run_simulations(simulation_duration_seconds, numberOfSimulations):
-    # My command
-    command = "roslaunch f1tenth_simulator headless_simulator.launch"
+    # Launch command
+    #command = "roslaunch f1tenth_simulator headless_simulator.launch"
+    command = "roslaunch f1tenth_simulator simulator.launch"
 
     # Define the namespaces and master URIs for each simulation
-    simulations = [
-        #{"namespace": "sim1", "master_uri": "http://localhost:11311"},
-        #{"namespace": "sim2", "master_uri": "http://localhost:11312"},
-    ]
-    for i in range(numberOfSimulations - 1):
-        print("simulation {} has started".format(i))
-        simulations.append({"namespace": "sim{}".format(i), "master_uri": "http://localhost:{}".format(11311 + i)})
+    simulations = []
 
-    # Create a list to store the subscribers
+    for i in range(1, numberOfSimulations+1):
+        print("simulation {} has started".format(i))
+        simulations.append({"namespace": "sim{}".format(i), 
+                            "master_uri": "http://localhost:{}".format(11311 + i)})
+
+    # List to store subscribers
     subscribers = []
 
     # For each simulation, create a separate subscriber
@@ -150,6 +151,7 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
         topic = "{}/simulation_results".format(namespace)
         subscriber = rospy.Subscriber(topic, String, result_callback, callback_args=namespace)
         subscribers.append(subscriber)
+        print("Subscribing to {}".format(sim["namespace"]))
 
     
     # Run each simulation in a separate subprocess
@@ -159,7 +161,9 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
         env = os.environ.copy()
         env["ROS_NAMESPACE"] = sim["namespace"]
         env["ROS_MASTER_URI"] = sim["master_uri"]
+        #rospy.ServiceProxy('/{}/gazebo/set_physics_properties'.format(sim["namespace"]))
 
+        print("Starting subprocess {}".format(env["ROS_MASTER_URI"]))
         # Start the simulation in a subprocess
         process = subprocess.Popen(command, shell=True, env=env)
         processes.append(process)
@@ -282,8 +286,8 @@ if __name__ == '__main__':
         
         random.seed(0) # Set seed for consistent testing...
         #evolution()
-        run_simulations(10, 2)
-
+        run_simulations(simulation_duration_seconds=10, numberOfSimulations=1)
+ 
         #meh = subprocess.Popen(['roslaunch', 'f1tenth_simulator', 'headless_simulator.launch'], env={"ROS_MASTER_URI": "http://localhost:{}".format(11311+1)})
         #listOfProcesses = []
         #for i in range(3):

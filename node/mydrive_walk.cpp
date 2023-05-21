@@ -252,7 +252,7 @@ public:
         starting_time = ros::Time::now();
         
         // Start publisher for lab results
-        results_pub = n.advertise<std_msgs::String>(results_topic, 1000);
+        results_pub = n.advertise<std_msgs::String>(results_topic, 10);
     }
 
 // --------------------------------------------------------------------------------------------------------------
