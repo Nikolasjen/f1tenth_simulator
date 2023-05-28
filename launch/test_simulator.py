@@ -8,10 +8,13 @@ from std_msgs.msg import String
 import yaml
 import rospkg
 import rosgraph
+import shutil
 
 F1TENTH_PATH = rospkg.RosPack().get_path('f1tenth_simulator')
 MAP_PATH = os.path.join(F1TENTH_PATH, "maps/porto.yaml")
 PARAMS_PATH = os.path.join(F1TENTH_PATH, "params.yaml")
+PATH_TO_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/simulator.rviz")
+PATH_TO_TEMPLATE_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/template_simulator.rviz")
 
 LIST_OF_NODE_NAMES = ["racecar_simulator", "mux_controller", "behavior_controller", "keyboard", "mydrive_walker"]
 
@@ -41,21 +44,55 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
         roscore_processes.append(roscore_process)
 
         # Load parameters on the Parameter Server
-
         ## List of node names (e.g. the name for the simulator node is racecar_simulator 
         ## - see in the ROS initialisation, in the main method at the bottom of each nodes code)
         for n_name in LIST_OF_NODE_NAMES:
             param_command = "rosparam load {} /{}/{}".format(PARAMS_PATH, sim["namespace"], n_name)
             param_process = subprocess.Popen(param_command, shell=True, env=env)
             param_process.wait()  # Wait for the process to complete
+
+        # Loading racecar_model parameters
+        RACECAR_MODEL_PARAMS_PATH = os.path.join(F1TENTH_PATH, "racecar.xacro")
+
+        # Converting xacro file to urdf and loading as parameter
+        temp_path = os.path.join(F1TENTH_PATH,"launch", "tmp")
+        xacro_command = "xacro --inorder {} > {}/{}.urdf".format(RACECAR_MODEL_PARAMS_PATH, temp_path, sim["namespace"])
+        xacro_process = subprocess.Popen(xacro_command, shell=True, env=env)
+        xacro_process.wait()
+
+        # Read the URDF from the temporary file and set it as a parameter
+        with open('{}/{}.urdf'.format(temp_path, sim["namespace"]), 'r') as urdf_file:
+            urdf_content = urdf_file.read()
+        #param_command = "rosparam set /{}/racecar/robot_description '{}'"
+        #param_command = param_command.format(sim["namespace"], urdf_content)
+        #param_process = subprocess.Popen(param_command, shell=True, env=env)
+        #param_process.wait()
+
+        # After converting the Xacro file to a URDF and reading the URDF content:
+        rospy.set_param("/{}/racecar/robot_description".format(sim["namespace"]), urdf_content)
+
+
+        # Run robot_state_publisher
+        #command_racecar_model = 'rosrun robot_state_publisher robot_state_publisher _robot_description:=/{}/racecar/robot_description'.format(env['ROS_NAMESPACE'])
         
+        # After setting the robot_description parameter:
+        command_racecar_model = 'rosrun robot_state_publisher robot_state_publisher'
+        # Update the environment variable for the namespace
+        env['ROS_NAMESPACE'] = '{}/racecar'.format(sim["namespace"])
+        process_racecar_model = subprocess.Popen(command_racecar_model, shell=True, env=env)
+        processes.append(load_racecar_model(sim,env))
+        
+        print("running - racecar_model")
+
+        # Reset the namespace after launching the robot_state_publisher node
+        env['ROS_NAMESPACE'] = sim["namespace"]
+
 
         # Start individual nodes in subprocesses
         localMapPath = os.path.join(sim["namespace"],MAP_PATH)
         command_map_server = "rosrun map_server map_server {}".format(localMapPath)
         
         command_simulator = "rosrun f1tenth_simulator simulator"
-        command_racecar_model = 'roslaunch f1tenth_simulator racecar_model.launch'
         command_mux_controller = "rosrun f1tenth_simulator mux"
         command_behavior_controller = "rosrun f1tenth_simulator behavior_controller"
         command_keyboard = "rosrun f1tenth_simulator keyboard"
@@ -64,13 +101,13 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
         
         print("Starting subprocess {}".format(env["ROS_MASTER_URI"]))
         process_map_server = subprocess.Popen(command_map_server, shell=True, env=env)
-        time.sleep(3)
-        print("running - map server")
-        process_racecar_model = subprocess.Popen(command_racecar_model, shell=True, env=env)
-        time.sleep(3)
-        print("running - racecar_model")
-        process_simulator = subprocess.Popen(command_simulator, shell=True, env=env)
         time.sleep(2)
+        print("running - map server")
+        #process_racecar_model = subprocess.Popen(command_racecar_model, shell=True, env=env)
+        #time.sleep(3)
+        #print("running - racecar_model")
+        process_simulator = subprocess.Popen(command_simulator, shell=True, env=env)
+        #time.sleep(2)
         print("running - simulator")
         process_mux_controller = subprocess.Popen(command_mux_controller, shell=True, env=env)
         #time.sleep(2)
@@ -85,7 +122,9 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
         print("running - mydrive")
         # More processes...
 
-        #parem_tester = subprocess.Popen("rosparam list", shell=True, env=env)
+        #command = "rosparam list | xargs -I {} sh -c 'echo {} = `rosparam get {}`'"
+        parem_tester = subprocess.Popen("rosparam get /{}/racecar/robot_description".format(sim['namespace']), shell=True, env=env)
+        parem_tester.wait()
         #print("---")
         #node_tester = subprocess.Popen("rosnode list", shell=True, env=env)
         #processes.append(parem_tester)
@@ -99,6 +138,12 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
         processes.append(process_keyboard)
         processes.append(process_mydrive_walker)
         # More processes...        
+
+        #time.sleep(3)
+        # Start RViz for this simulation
+        process_rviz = run_RViz(sim, env)
+        processes.append(process_rviz)
+        print("running - RViz")
 
         # Wait a moment before starting the next simulation
         time.sleep(2)
@@ -114,6 +159,7 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
         subscribers.append(subscriber)
         print("Subscribing to {}".format(sim["namespace"]))
     
+    #time.sleep(20)
     # Wait for all simulations to finish
     for process in processes:
         print("Waiting...")
@@ -127,6 +173,43 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
     
     # Spin to keep the script alive
     rospy.spin()
+
+
+def load_racecar_model(sim, env):
+    # Loading racecar_model parameters
+    RACECAR_MODEL_PARAMS_PATH = os.path.join(F1TENTH_PATH, "racecar.xacro")
+    with open(RACECAR_MODEL_PARAMS_PATH, 'r') as f:
+        urdf_content = f.read()
+
+    print(urdf_content)  # Print URDF content for debugging
+
+    rospy.set_param("/{}/racecar/robot_description".format(sim["namespace"]), urdf_content)
+
+    command_racecar_model = 'rosrun robot_state_publisher robot_state_publisher'
+    # Update the environment variable for the namespace
+    env['ROS_NAMESPACE'] = '{}/racecar'.format(sim["namespace"])
+    process_racecar_model = subprocess.Popen(command_racecar_model, shell=True, env=env)
+    # Reset the namespace after launching the robot_state_publisher node
+    env['ROS_NAMESPACE'] = sim["namespace"]
+    return process_racecar_model
+
+
+
+def run_RViz(sim, env):
+    # Create a new RViz config file by replacing the placeholder with the namespace
+    rViz_template_file_path = os.path.join(sim['namespace'], PATH_TO_TEMPLATE_RVIZ_CONFIG_FILE)
+    with open(rViz_template_file_path, 'r') as template_file:
+        template_content = template_file.read()
+    rviz_config_content = template_content.replace('NAMESPACE_PLACEHOLDER', sim["namespace"])
+    rviz_temp_path = os.path.join(F1TENTH_PATH,"launch", "tmp")
+    rviz_config_path = '{}/rviz_config_{}.rviz'.format(rviz_temp_path, sim["namespace"])
+    with open(rviz_config_path, 'w') as rviz_config_file:
+        rviz_config_file.write(rviz_config_content)
+
+    # Start RViz for this simulation (sim)
+    rviz_command = 'rosrun rviz rviz -d ' + rviz_config_path
+    process_rviz = subprocess.Popen(rviz_command, shell=True, env=env)
+    return process_rviz
 
 
 def start_roscore(master_uri):
@@ -159,6 +242,19 @@ if __name__ == '__main__':
         #print("running - map")
  
         run_simulations(simulation_duration_seconds=10, numberOfSimulations=1)
+        """
+        #-------
+        launch_command = "roslaunch f1tenth_simulator this_test_simulator.launch"
+        
+        # Start launch in subprocess
+        process_launcher = subprocess.Popen(launch_command, shell=True, env=os.environ.copy())
+
+        # Wait for all simulations to finish
+        print("Waiting...")
+        process_launcher.wait()
+        #----------
+        """
+        #run_launch_simulations(1)
 
         if initial_roscore_process is not None:
             #process_map_server.terminate()
@@ -166,6 +262,10 @@ if __name__ == '__main__':
             initial_roscore_process.terminate()
             initial_roscore_process.wait()
 
+        # Spin to keep the script alive
+        rospy.spin()
+
     except:
         print("Process terminated... error in test_simulator code!")
-        pass
+        # Spin to keep the script alive
+        rospy.spin()
