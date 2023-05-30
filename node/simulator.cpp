@@ -48,7 +48,7 @@ private:
     int obstacle_size;
 
     // interactive markers' server
-    interactive_markers::InteractiveMarkerServer im_server;
+    //interactive_markers::InteractiveMarkerServer im_server;
 
     // The car state and parameters
     CarState state;
@@ -127,10 +127,11 @@ private:
     int buffer_length;
     std::vector<double> steering_buffer;
 
+    std::string map_topic; // made map_topic a field varaible as it is used in two different scopes.
 
 public:
 
-    RacecarSimulator(): im_server("racecar_sim") {
+    RacecarSimulator() { // : im_server("racecar_sim")
         // Initialize the node handle
         n = ros::NodeHandle("~");
 
@@ -143,7 +144,7 @@ public:
         previous_seconds = ros::Time::now().toSec();
 
         // Get the topic names
-        std::string drive_topic, map_topic, scan_topic, pose_topic, gt_pose_topic, 
+        std::string drive_topic, scan_topic, pose_topic, gt_pose_topic, 
         pose_rviz_topic, odom_topic, imu_topic;
         n.getParam("drive_topic", drive_topic);
         n.getParam("map_topic", map_topic);
@@ -153,6 +154,10 @@ public:
         n.getParam("pose_rviz_topic", pose_rviz_topic);
         n.getParam("imu_topic", imu_topic);
         n.getParam("ground_truth_pose_topic", gt_pose_topic);
+
+        // map_topic is set to /simulation_namespace/map to allow parallel (multiple simultaneous) simulations.
+        std::string ns = ros::this_node::getNamespace();    // My stuff
+        map_topic = ns + "/map";                            // My stuff
 
         // Get steering delay params
         n.getParam("buffer_length", buffer_length);
@@ -213,7 +218,7 @@ public:
         imu_pub = n.advertise<sensor_msgs::Imu>(imu_topic, 1);
 
         // Make a publisher for publishing map with obstacles
-        map_pub = n.advertise<nav_msgs::OccupancyGrid>("/map", 1);
+        map_pub = n.advertise<nav_msgs::OccupancyGrid>(map_topic, 1);
 
         // Make a publisher for ground truth pose
         pose_pub = n.advertise<geometry_msgs::PoseStamped>(gt_pose_topic, 1);
@@ -252,7 +257,10 @@ public:
         // wait for one map message to get the map data array
         boost::shared_ptr<nav_msgs::OccupancyGrid const> map_ptr;
         nav_msgs::OccupancyGrid map_msg;
-        map_ptr = ros::topic::waitForMessage<nav_msgs::OccupancyGrid>("/map");
+        
+        
+
+        map_ptr = ros::topic::waitForMessage<nav_msgs::OccupancyGrid>(map_topic);
         if (map_ptr != NULL) {
             map_msg = *map_ptr;
         }
@@ -267,6 +275,7 @@ public:
         origin_y = map_msg.info.origin.position.y;
         map_resolution = map_msg.info.resolution;
 
+/*
         // create button for clearing obstacles
         visualization_msgs::InteractiveMarker clear_obs_button;
         clear_obs_button.header.frame_id = "map";
@@ -300,6 +309,7 @@ public:
         im_server.setCallback(clear_obs_button.name, boost::bind(&RacecarSimulator::clear_obstacles, this, _1));
 
         im_server.applyChanges();
+*/
 
         ROS_INFO("Simulator constructed.");
     }
@@ -414,7 +424,7 @@ public:
     } // end of update_pose
 
 
-        /// ---------------------- GENERAL HELPER FUNCTIONS ----------------------
+    /// ---------------------- GENERAL HELPER FUNCTIONS ----------------------
 
     std::vector<int> ind_2_rc(int ind) {
         std::vector<int> rc;
@@ -526,10 +536,10 @@ public:
 	    // zero speed, accel either way
 	    double kp = 2.0 * max_accel / max_speed;
 	    set_accel(kp * dif);
-	}
+	    }
     }
 
-        /// ---------------------- CALLBACK FUNCTIONS ----------------------
+    /// ---------------------- CALLBACK FUNCTIONS ----------------------
 
     void obs_callback(const geometry_msgs::PointStamped &msg) {
         double x = msg.point.x;
@@ -575,157 +585,157 @@ public:
         }
     }
 
-        void map_callback(const nav_msgs::OccupancyGrid & msg) {
-            // Fetch the map parameters
-            size_t height = msg.info.height;
-            size_t width = msg.info.width;
-            double resolution = msg.info.resolution;
-            // Convert the ROS origin to a pose
-            Pose2D origin;
-            origin.x = msg.info.origin.position.x;
-            origin.y = msg.info.origin.position.y;
-            geometry_msgs::Quaternion q = msg.info.origin.orientation;
-            tf2::Quaternion quat(q.x, q.y, q.z, q.w);
-            origin.theta = tf2::impl::getYaw(quat);
+    void map_callback(const nav_msgs::OccupancyGrid & msg) {
+        // Fetch the map parameters
+        size_t height = msg.info.height;
+        size_t width = msg.info.width;
+        double resolution = msg.info.resolution;
+        // Convert the ROS origin to a pose
+        Pose2D origin;
+        origin.x = msg.info.origin.position.x;
+        origin.y = msg.info.origin.position.y;
+        geometry_msgs::Quaternion q = msg.info.origin.orientation;
+        tf2::Quaternion quat(q.x, q.y, q.z, q.w);
+        origin.theta = tf2::impl::getYaw(quat);
 
-            // Convert the map to probability values
-            std::vector<double> map(msg.data.size());
-            for (size_t i = 0; i < height * width; i++) {
-                if (msg.data[i] > 100 or msg.data[i] < 0) {
-                    map[i] = 0.5; // Unknown
-                } else {
-                    map[i] = msg.data[i]/100.;
-                }
+        // Convert the map to probability values
+        std::vector<double> map(msg.data.size());
+        for (size_t i = 0; i < height * width; i++) {
+            if (msg.data[i] > 100 or msg.data[i] < 0) {
+                map[i] = 0.5; // Unknown
+            } else {
+                map[i] = msg.data[i]/100.;
             }
-
-            // Send the map to the scanner
-            scan_simulator.set_map(
-                map,
-                height,
-                width,
-                resolution,
-                origin,
-                map_free_threshold);
-            map_exists = true;
         }
 
-        /// ---------------------- PUBLISHING HELPER FUNCTIONS ----------------------
+        // Send the map to the scanner
+        scan_simulator.set_map(
+            map,
+            height,
+            width,
+            resolution,
+            origin,
+            map_free_threshold);
+        map_exists = true;
+    }
 
-        void pub_pose_transform(ros::Time timestamp) {
-            // Only publish if enough time has passed since the last publication
-            if ((timestamp - last_pose_tf_time).toSec() < 0.01) return; // Adjust the time as necessary
-            
-            // Convert the pose into a transformation
-            geometry_msgs::Transform t;
-            t.translation.x = state.x;
-            t.translation.y = state.y;
-            tf2::Quaternion quat;
-            quat.setEuler(0., 0., state.theta);
-            t.rotation.x = quat.x();
-            t.rotation.y = quat.y();
-            t.rotation.z = quat.z();
-            t.rotation.w = quat.w();
+    /// ---------------------- PUBLISHING HELPER FUNCTIONS ----------------------
 
-            // publish ground truth pose
-            geometry_msgs::PoseStamped ps;
-            ps.header.frame_id = "/map";
-            ps.pose.position.x = state.x;
-            ps.pose.position.y = state.y;
-            ps.pose.orientation.x = quat.x();
-            ps.pose.orientation.y = quat.y();
-            ps.pose.orientation.z = quat.z();
-            ps.pose.orientation.w = quat.w();
+    void pub_pose_transform(ros::Time timestamp) {
+        // Only publish if enough time has passed since the last publication
+        if ((timestamp - last_pose_tf_time).toSec() < 0.01) return; // Adjust the time as necessary
+        
+        // Convert the pose into a transformation
+        geometry_msgs::Transform t;
+        t.translation.x = state.x;
+        t.translation.y = state.y;
+        tf2::Quaternion quat;
+        quat.setEuler(0., 0., state.theta);
+        t.rotation.x = quat.x();
+        t.rotation.y = quat.y();
+        t.rotation.z = quat.z();
+        t.rotation.w = quat.w();
 
-            // Add a header to the transformation
-            geometry_msgs::TransformStamped ts;
-            ts.transform = t;
-            ts.header.stamp = timestamp;
-            ts.header.frame_id = map_frame;
-            ts.child_frame_id = base_frame;
+        // publish ground truth pose
+        geometry_msgs::PoseStamped ps;
+        ps.header.frame_id = map_topic;
+        ps.pose.position.x = state.x;
+        ps.pose.position.y = state.y;
+        ps.pose.orientation.x = quat.x();
+        ps.pose.orientation.y = quat.y();
+        ps.pose.orientation.z = quat.z();
+        ps.pose.orientation.w = quat.w();
 
-            // Publish them
-            if (broadcast_transform) {
-                br.sendTransform(ts);
-            }
-            if (pub_gt_pose) {
-                pose_pub.publish(ps);
-            }
+        // Add a header to the transformation
+        geometry_msgs::TransformStamped ts;
+        ts.transform = t;
+        ts.header.stamp = timestamp;
+        ts.header.frame_id = map_frame;
+        ts.child_frame_id = base_frame;
 
-            // Remember when we published
-            last_pose_tf_time = timestamp;
+        // Publish them
+        if (broadcast_transform) {
+            br.sendTransform(ts);
+        }
+        if (pub_gt_pose) {
+            pose_pub.publish(ps);
         }
 
-        void pub_steer_ang_transform(ros::Time timestamp) {
-            // Only publish if enough time has passed since the last publication
-            if ((timestamp - last_steer_tf_time).toSec() < 0.01) return; // Adjust the time as necessary
+        // Remember when we published
+        last_pose_tf_time = timestamp;
+    }
 
-            // Set the steering angle to make the wheels move
-            // Publish the steering angle
-            tf2::Quaternion quat_wheel;
-            quat_wheel.setEuler(0., 0., state.steer_angle);
-            geometry_msgs::TransformStamped ts_wheel;
-            ts_wheel.transform.rotation.x = quat_wheel.x();
-            ts_wheel.transform.rotation.y = quat_wheel.y();
-            ts_wheel.transform.rotation.z = quat_wheel.z();
-            ts_wheel.transform.rotation.w = quat_wheel.w();
-            ts_wheel.header.stamp = timestamp;
-            ts_wheel.header.frame_id = "front_left_hinge";
-            ts_wheel.child_frame_id = "front_left_wheel";
-            br.sendTransform(ts_wheel);
-            ts_wheel.header.frame_id = "front_right_hinge";
-            ts_wheel.child_frame_id = "front_right_wheel";
-            br.sendTransform(ts_wheel);
+    void pub_steer_ang_transform(ros::Time timestamp) {
+        // Only publish if enough time has passed since the last publication
+        if ((timestamp - last_steer_tf_time).toSec() < 0.01) return; // Adjust the time as necessary
 
-            // Remember when we published
-            last_steer_tf_time = timestamp;
-        }
+        // Set the steering angle to make the wheels move
+        // Publish the steering angle
+        tf2::Quaternion quat_wheel;
+        quat_wheel.setEuler(0., 0., state.steer_angle);
+        geometry_msgs::TransformStamped ts_wheel;
+        ts_wheel.transform.rotation.x = quat_wheel.x();
+        ts_wheel.transform.rotation.y = quat_wheel.y();
+        ts_wheel.transform.rotation.z = quat_wheel.z();
+        ts_wheel.transform.rotation.w = quat_wheel.w();
+        ts_wheel.header.stamp = timestamp;
+        ts_wheel.header.frame_id = "front_left_hinge";
+        ts_wheel.child_frame_id = "front_left_wheel";
+        br.sendTransform(ts_wheel);
+        ts_wheel.header.frame_id = "front_right_hinge";
+        ts_wheel.child_frame_id = "front_right_wheel";
+        br.sendTransform(ts_wheel);
 
-        void pub_laser_link_transform(ros::Time timestamp) {
-            // Only publish if enough time has passed since the last publication
-            if ((timestamp - last_laser_link_tf_time).toSec() < 0.01) return; // Adjust the time as necessary
+        // Remember when we published
+        last_steer_tf_time = timestamp;
+    }
 
-            // Publish a transformation between base link and laser
-            geometry_msgs::TransformStamped scan_ts;
-            scan_ts.transform.translation.x = scan_distance_to_base_link;
-            scan_ts.transform.rotation.w = 1;
-            scan_ts.header.stamp = timestamp;
-            scan_ts.header.frame_id = base_frame;
-            scan_ts.child_frame_id = scan_frame;
-            br.sendTransform(scan_ts);
+    void pub_laser_link_transform(ros::Time timestamp) {
+        // Only publish if enough time has passed since the last publication
+        if ((timestamp - last_laser_link_tf_time).toSec() < 0.01) return; // Adjust the time as necessary
 
-            // Remember when we published
-            last_laser_link_tf_time = timestamp;
-        }
+        // Publish a transformation between base link and laser
+        geometry_msgs::TransformStamped scan_ts;
+        scan_ts.transform.translation.x = scan_distance_to_base_link;
+        scan_ts.transform.rotation.w = 1;
+        scan_ts.header.stamp = timestamp;
+        scan_ts.header.frame_id = base_frame;
+        scan_ts.child_frame_id = scan_frame;
+        br.sendTransform(scan_ts);
 
-        void pub_odom(ros::Time timestamp) {
-            // Make an odom message and publish it
-            nav_msgs::Odometry odom;
-            odom.header.stamp = timestamp;
-            odom.header.frame_id = map_frame;
-            odom.child_frame_id = base_frame;
-            odom.pose.pose.position.x = state.x;
-            odom.pose.pose.position.y = state.y;
-            tf2::Quaternion quat;
-            quat.setEuler(0., 0., state.theta);
-            odom.pose.pose.orientation.x = quat.x();
-            odom.pose.pose.orientation.y = quat.y();
-            odom.pose.pose.orientation.z = quat.z();
-            odom.pose.pose.orientation.w = quat.w();
-            odom.twist.twist.linear.x = state.velocity;
-            odom.twist.twist.angular.z = state.angular_velocity;
-            odom_pub.publish(odom);
-        }
+        // Remember when we published
+        last_laser_link_tf_time = timestamp;
+    }
 
-        void pub_imu(ros::Time timestamp) {
-            // Make an IMU message and publish it
-            // TODO: make imu message
-            sensor_msgs::Imu imu;
-            imu.header.stamp = timestamp;
-            imu.header.frame_id = map_frame;
+    void pub_odom(ros::Time timestamp) {
+        // Make an odom message and publish it
+        nav_msgs::Odometry odom;
+        odom.header.stamp = timestamp;
+        odom.header.frame_id = map_frame;
+        odom.child_frame_id = base_frame;
+        odom.pose.pose.position.x = state.x;
+        odom.pose.pose.position.y = state.y;
+        tf2::Quaternion quat;
+        quat.setEuler(0., 0., state.theta);
+        odom.pose.pose.orientation.x = quat.x();
+        odom.pose.pose.orientation.y = quat.y();
+        odom.pose.pose.orientation.z = quat.z();
+        odom.pose.pose.orientation.w = quat.w();
+        odom.twist.twist.linear.x = state.velocity;
+        odom.twist.twist.angular.z = state.angular_velocity;
+        odom_pub.publish(odom);
+    }
+
+    void pub_imu(ros::Time timestamp) {
+        // Make an IMU message and publish it
+        // TODO: make imu message
+        sensor_msgs::Imu imu;
+        imu.header.stamp = timestamp;
+        imu.header.frame_id = map_frame;
 
 
-            imu_pub.publish(imu);
-        }
+        imu_pub.publish(imu);
+    }
 
 };
 
