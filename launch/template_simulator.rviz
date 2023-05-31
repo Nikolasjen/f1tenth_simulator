@@ -39,7 +39,7 @@ Visualization Manager:
       Draw Behind: false
       Enabled: true
       Name: Map
-      Topic: /NAMESPACE_PLACEHOLDER/map
+      Topic: /map
       Unreliable: false
       Use Timestamp: false
       Value: true
@@ -75,7 +75,7 @@ Visualization Manager:
       Size (Pixels): 3
       Size (m): 0.10000000149011612
       Style: Flat Squares
-      Topic: /scan
+      Topic: /NAMESPACE_PLACEHOLDER/scan
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true

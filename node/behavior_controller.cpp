@@ -103,6 +103,15 @@ public:
         n.getParam("keyboard_topic", keyboard_topic);
         n.getParam("brake_bool_topic", brake_bool_topic);
 
+        std::string ns = ros::this_node::getNamespace();    // My stuff
+        scan_topic = ns + scan_topic;                            // My stuff
+        odom_topic = ns + odom_topic;                            // My stuff
+        imu_topic = ns + imu_topic;                            // My stuff
+        joy_topic = ns + joy_topic;                            // My stuff
+        mux_topic = ns + mux_topic;                            // My stuff
+        keyboard_topic = ns + keyboard_topic;                            // My stuff
+        brake_bool_topic = ns + brake_bool_topic;                            // My stuff
+
         // Make a publisher for mux messages
         mux_pub = n.advertise<std_msgs::Int32MultiArray>(mux_topic, 10);
 

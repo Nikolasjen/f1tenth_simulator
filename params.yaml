@@ -1,7 +1,10 @@
-# Params for PID control
+# My algorithm needs these:
+## Params for PID control
 Kp: 1.1
 Ki: 0.2
 Kd: 8.3
+
+simulation_results_topic: "/results"
 
 # The distance between the front and
 # rear axle of the racecar

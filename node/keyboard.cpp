@@ -25,6 +25,9 @@ int main(int argc, char ** argv) {
     // Initialze publisher
     std::string keyboard_topic;
     n.getParam("keyboard_topic", keyboard_topic);
+    
+    std::string ns = ros::this_node::getNamespace();    // My stuff
+    keyboard_topic = ns + keyboard_topic;                            // My stuff
 
     ros::Publisher key_pub = n.advertise<std_msgs::String>(keyboard_topic, 10);
 

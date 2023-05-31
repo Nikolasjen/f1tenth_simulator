@@ -56,12 +56,12 @@ private:
 
     double CHECK_BREAK_RANGE = 45/2; // degrees
     ros::Time starting_time = ros::Time::now();
-    ros::Time last_lab_time = ros::Time::now();
+    ros::Time last_lap_time = ros::Time::now();
 
     ros::Duration time_to_pass = ros::Duration(1);
     ros::Time last_passed_time = ros::Time::now();
     ros::WallTime meh = ros::WallTime::now();
-    ros::WallTime meh_last_lab_time = ros::WallTime::now();
+    ros::WallTime meh_last_lap_time = ros::WallTime::now();
     bool meh_tester = false;
 
     struct Point {
@@ -70,33 +70,7 @@ private:
     };
     vector<Point> ppts;
     Point prev_pos = Point{0,0};
-/*
-    vector<Point> ppts = {
-        Point{0.0, 0.0},
-        Point{0.519, -0.716},
-        Point{1.76, -1.49},
-        Point{2.75, -1.86},
-        Point{3.85, -1.49},
-        Point{4.4, -0.362},
-        Point{4.18, 0.662},
-        Point{3.05, 1.36},
-        Point{1.37, 1.51},
-        Point{-0.0212, 1.66},
-        Point{-1.23, 1.74},
-        Point{-2.65, 1.9},
-        Point{-4.7, 1.9},
-        Point{-6.35, 1.9},
-        Point{-8.03, 1.25},
-        Point{-8.48, 0.116},
-        Point{-7.97, -1.17},
-        Point{-6.62, -1.5},
-        Point{-5.26, -1.32},
-        Point{-3.72, -0.739},
-        Point{-2.44, -0.195},
-        Point{-1.31, -0.016},
-        Point{-0.173, -0.239}
-        };
-*/
+
     // PID controller parameters
     double Kp = 0.5;
     double Ki = 0.1;
@@ -104,8 +78,9 @@ private:
     double integral = 0.0;
     double prev_error = 0.0;
 
-    // ROS publish lab results to EVO-ALG
+    // ROS publish lap results to EVO-ALG
     ros::Publisher results_pub;
+    //ros::Subscriber results_sub;
 
     // Read CSV file
     string csv_name = "testMapPoints.csv";
@@ -115,7 +90,7 @@ private:
     Point next_point;
 
     // Write CSV file
-    string csv_labs_name = "/home/aleksander/catkin_ws/src/f1tenth_simulator/labs.csv";
+    string csv_laps_name = "/home/aleksander/catkin_ws/src/f1tenth_simulator/laps.csv";
 
 
     void publish_speed_and_steering_angle(
@@ -137,7 +112,7 @@ private:
         }
 
 
-    void write_CSV_labs(string filePathAndName, string labTime) {
+    void write_CSV_laps(string filePathAndName, string lapTime) {
         ofstream myFile_Handler;
         string myLine;
 
@@ -145,10 +120,10 @@ private:
         myFile_Handler.open(filePathAndName, ios::out); // TODO: Change to ios::app if I want more than one value (don't delete preious times)
 
         if(myFile_Handler.is_open()) {
-            myFile_Handler << labTime << endl;
+            myFile_Handler << lapTime << endl;
             myFile_Handler.close();
         } else {
-            cout << "Unable to open the file! - write_CSV_labs" << endl;
+            cout << "Unable to open the file! - write_CSV_laps" << endl;
         }
     }
         
@@ -199,11 +174,11 @@ private:
 
     void reset_times() {
         starting_time = ros::Time::now();
-        last_lab_time = ros::Time::now();
+        last_lap_time = ros::Time::now();
 
         last_passed_time = ros::Time::now();
         meh = ros::WallTime::now();
-        meh_last_lab_time = ros::WallTime::now();
+        meh_last_lap_time = ros::WallTime::now();
     }
 
 public:
@@ -212,12 +187,20 @@ public:
         n = ros::NodeHandle("~");
 
         // get topic names
-        string drive_topic, odom_topic, scan_topic, results_topic;
-        n.getParam("mydrive_drive_topic", drive_topic);
+        string mydrive_drive_topic, odom_topic, scan_topic, results_topic;
+        n.getParam("mydrive_drive_topic", mydrive_drive_topic);
         n.getParam("odom_topic", odom_topic);
         n.getParam("scan_topic", scan_topic);
+        n.getParam("simulation_results_topic", results_topic);
+        
+        // get params
         n.getParam("scan_field_of_view", scan_field_of_view);
-        n.getParam("simulation_results", results_topic);
+
+        std::string ns = ros::this_node::getNamespace();    // My stuff
+        mydrive_drive_topic = ns + mydrive_drive_topic;                            // My stuff
+        odom_topic = ns + odom_topic;                            // My stuff
+        scan_topic = ns + scan_topic;  
+        results_topic = ns + results_topic;                            // My stuff
 
         // get car parameters
         n.getParam("max_speed", max_speed);
@@ -243,7 +226,10 @@ public:
         next_point = points.front();
 
         // Make a publisher for drive messages
-        drive_pub = n.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 10);
+        drive_pub = n.advertise<ackermann_msgs::AckermannDriveStamped>(mydrive_drive_topic, 10);
+
+        // Make a publisher for lap results
+        results_pub = n.advertise<std_msgs::String>(results_topic, 10);
 
         // Start a subscriber to listen to odom messages
         odom_sub = n.subscribe(odom_topic, 1, &MydriveWalker::odom_callback, this);
@@ -251,8 +237,7 @@ public:
         scan_sub = n.subscribe(scan_topic, 1, &MydriveWalker::laser_callback, this);
         starting_time = ros::Time::now();
         
-        // Start publisher for lab results
-        results_pub = n.advertise<std_msgs::String>(results_topic, 10);
+        
     }
 
 // --------------------------------------------------------------------------------------------------------------
@@ -280,7 +265,6 @@ public:
             }
 
         }
-        // cout << "shortest dist: " << shortest_distance << endl;
 
         if (shortest_distance < WALL_BREAK_DIST) {
             breaking = true;
@@ -322,25 +306,27 @@ public:
                 next_point = points.front();
             } else {
                 points = ppts;
-                ros::WallDuration meh_total = ros::WallTime::now() - meh;
-                ros::WallDuration meh_lab = ros::WallTime::now() - meh_last_lab_time;
-                meh_last_lab_time = ros::WallTime::now();
+                //ros::WallDuration meh_total = ros::WallTime::now() - meh;
+                //ros::WallDuration meh_lap = ros::WallTime::now() - meh_last_lap_time;
+                //meh_last_lap_time = ros::WallTime::now();
 
-                ros::Duration total_time = (ros::Time::now() - starting_time);
-                ros::Duration lab_time = ros::Time::now() - last_lab_time;
-                last_lab_time = ros::Time::now();
+                //ros::Duration total_time = (ros::Time::now() - starting_time);
+                ros::Duration lap_time = ros::Time::now() - last_lap_time;
+                last_lap_time = ros::Time::now();
+                /*
                 cout << "- - - - - - -" << endl;
-                cout << "Total... m: " << round(total_time.toSec()/60) << ", s: " << total_time.toSec() - (round(total_time.toSec()/60) * 60) << endl;
-                cout << "Lab...   m: " << round(lab_time.toSec()/60) << ", s: " << lab_time.toSec() - (round(lab_time.toSec()/60) * 60) << endl;
+                //cout << "Total... m: " << round(total_time.toSec()/60) << ", s: " << total_time.toSec() - (round(total_time.toSec()/60) * 60) << endl;
+                cout << "Lap...   m: " << round(lap_time.toSec()/60) << ", s: " << lap_time.toSec() - (round(lap_time.toSec()/60) * 60) << endl;
                 cout << endl;
-                cout << "meh Total... m: " << round(meh_total.toSec()/60) << ", s: " << meh_total.toSec() - (round(meh_total.toSec()/60) * 60) << endl;
-                cout << "meh Lab...   m: " << round(meh_lab.toSec()/60) << ", s: " << meh_lab.toSec() - (round(meh_lab.toSec()/60) * 60) << endl;
+                //cout << "meh Total... m: " << round(meh_total.toSec()/60) << ", s: " << meh_total.toSec() - (round(meh_total.toSec()/60) * 60) << endl;
+                //cout << "meh Lap...   m: " << round(meh_lap.toSec()/60) << ", s: " << meh_lap.toSec() - (round(meh_lap.toSec()/60) * 60) << endl;
                 cout << "- - - - - - -" << endl;
+                */
 
                 std_msgs::String msg;
-                msg.data = to_string(lab_time.toSec());
+                msg.data = to_string(lap_time.toSec());
                 results_pub.publish(msg);
-                //write_CSV_labs(csv_labs_name, to_string(lab_time.toSec()));
+                //write_CSV_laps(csv_laps_name, to_string(lap_time.toSec()));
             }
 
         }
@@ -395,41 +381,6 @@ public:
             reset_times();
             meh_tester = true;
         }
-
-        if (collisions < 1 && isDriving) {
-            /*
-            ros::Time current_time = ros::Time::now();
-            double current_speed = msg.twist.twist.linear.x;
-            double current_angle = theta;
-            */
-
-
-            ros::Duration total_time = (ros::Time::now() - starting_time);
-            ros::Duration check_time = (ros::Time::now() - last_passed_time);
-            double time = total_time.toSec();
-            if (check_time > time_to_pass) {
-                cout << "Total time spent: " << round(time, 2) << "s" << ", (~" << round(time/60, 1) << "m)" << endl;
-                last_passed_time = ros::Time::now();
-            }
-            /*
-            cout << "[" << current_time << "]" << ", Speed: " << round(current_speed, 3) << ", Steering: " << round(current_angle, 3) << endl;
-            cout << " -- -- -- -- " << endl;
-            cout << "desired_heading_angle: " << desired_heading_angle << endl;
-            cout << "Current angle: " << theta << endl;
-            cout << "error: " << error << endl;
-            cout << "New drive angle: " << new_drive_angle << endl;
-            cout << "integral: " << integral << endl;
-            */
-            //cout << " -- -- " << endl;
-            //cout << "Current pos: x: " << x << ", y: " << y << endl;
-            //cout << "Desired pos: x: " << next_point.x << ", y: " << next_point.y << endl;
-        }
-        /*
-        if (abs(error) > 1) {
-            cout << "Error too great!: " << error << endl;
-        }
-        */
-        
 
         // Publish the new speed and steering angle
         publish_speed_and_steering_angle(drive_st_msg, drive_msg, new_drive_angle);

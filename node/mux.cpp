@@ -55,6 +55,7 @@ public:
     Mux() {
         // Initialize the node handle
         n = ros::NodeHandle("~");
+        std::string ns = ros::this_node::getNamespace();    // My stuff
 
         // get topic names
         std::string drive_topic, mux_topic, joy_topic, key_topic;
@@ -62,6 +63,11 @@ public:
         n.getParam("mux_topic", mux_topic);
         n.getParam("joy_topic", joy_topic);
         n.getParam("keyboard_topic", key_topic);
+
+        drive_topic = ns + drive_topic;                            // My stuff
+        mux_topic = ns + mux_topic;                            // My stuff
+        joy_topic = ns + joy_topic;                            // My stuff
+        key_topic = ns + key_topic;                            // My stuff
 
         // Make a publisher for drive messages
         drive_pub = n.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 10);
@@ -107,6 +113,7 @@ public:
         std::string rand_drive_topic;
         n.getParam("rand_drive_topic", rand_drive_topic);
         n.getParam("random_walker_mux_idx", random_walker_mux_idx);
+        rand_drive_topic = ns + rand_drive_topic;                            // My stuff
         add_channel(rand_drive_topic, drive_topic, random_walker_mux_idx);
 
         // Channel for emergency braking
@@ -114,6 +121,7 @@ public:
         std::string brake_drive_topic;
         n.getParam("brake_drive_topic", brake_drive_topic);
         n.getParam("brake_mux_idx", brake_mux_idx);
+        brake_drive_topic = ns + brake_drive_topic;                            // My stuff
         add_channel(brake_drive_topic, drive_topic, brake_mux_idx);
 
         // General navigation channel
@@ -121,13 +129,16 @@ public:
         std::string nav_drive_topic;
         n.getParam("nav_drive_topic", nav_drive_topic);
         n.getParam("nav_mux_idx", nav_mux_idx);
+        nav_drive_topic = ns + nav_drive_topic;                            // My stuff
         add_channel(nav_drive_topic, drive_topic, nav_mux_idx);
+
 
         // Channel for Mydrive driver
         int mydrive_walker_mux_idx;
         std::string mydrive_drive_topic;
         n.getParam("mydrive_drive_topic", mydrive_drive_topic);
         n.getParam("mydrive_walker_mux_idx", mydrive_walker_mux_idx);
+        mydrive_drive_topic = ns + mydrive_drive_topic;                            // My stuff
         add_channel(mydrive_drive_topic, drive_topic, mydrive_walker_mux_idx);
 
         // ***Add a channel for a new planner here - THIS IS AN EXAMPLE**

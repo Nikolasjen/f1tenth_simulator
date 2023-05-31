@@ -157,7 +157,15 @@ public:
 
         // map_topic is set to /simulation_namespace/map to allow parallel (multiple simultaneous) simulations.
         std::string ns = ros::this_node::getNamespace();    // My stuff
-        map_topic = ns + "/map";                            // My stuff
+        //map_topic = ns + map_topic;                            // My stuff
+
+        scan_topic = ns + scan_topic;                            // My stuff
+        drive_topic = ns + drive_topic;                            // My stuff
+        pose_topic = ns + pose_topic;                            // My stuff
+        odom_topic = ns + odom_topic;                            // My stuff
+        pose_rviz_topic = ns + pose_rviz_topic;                            // My stuff
+        imu_topic = ns + imu_topic;                            // My stuff
+        gt_pose_topic = ns + gt_pose_topic;                            // My stuff
 
         // Get steering delay params
         n.getParam("buffer_length", buffer_length);
