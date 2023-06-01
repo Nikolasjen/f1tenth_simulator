@@ -21,6 +21,12 @@
 #include <algorithm>
 #include <tf/transform_datatypes.h>
 
+// read map
+#include <geometry_msgs/PoseArray.h>
+#include <chrono>
+#include <thread>
+
+
 
 using namespace std; 
 
@@ -50,19 +56,17 @@ private:
     double COLLISION_DIST = 0.01;
     int collisions = 0;
     bool breaking = false;
-    double WALL_BREAK_DIST = 1.5;
+    double WALL_BREAK_DIST = 2.25;
     double normal_speed = 0.0;
     double breaking_speed = 0.0;
 
     double CHECK_BREAK_RANGE = 45/2; // degrees
-    ros::Time starting_time = ros::Time::now();
-    ros::Time last_lap_time = ros::Time::now();
+    ros::Time starting_time;
+    ros::Time last_lap_time;
 
     ros::Duration time_to_pass = ros::Duration(1);
-    ros::Time last_passed_time = ros::Time::now();
-    ros::WallTime meh = ros::WallTime::now();
-    ros::WallTime meh_last_lap_time = ros::WallTime::now();
-    bool meh_tester = false;
+    ros::Time last_passed_time;
+    bool has_started_tester = false;
 
     struct Point {
         double x;
@@ -80,17 +84,20 @@ private:
 
     // ROS publish lap results to EVO-ALG
     ros::Publisher results_pub;
-    //ros::Subscriber results_sub;
 
     // Read CSV file
     string csv_name = "testMapPoints.csv";
     vector<Point> points;
-    const double DISTANCE_THRESHOLD = 1.0; // distance threshold for changing to next point
+    const double DISTANCE_THRESHOLD = 1.5; // distance threshold for changing to next point
     Point current_point;
     Point next_point;
 
     // Write CSV file
-    string csv_laps_name = "/home/aleksander/catkin_ws/src/f1tenth_simulator/laps.csv";
+    //string csv_laps_name = "/home/aleksander/catkin_ws/src/f1tenth_simulator/laps.csv";
+    ros::Subscriber map_data_sub;
+    ros::Publisher map_request_pub;
+    bool map_received = false;
+
 
 
     void publish_speed_and_steering_angle(
@@ -111,61 +118,6 @@ private:
             drive_pub.publish(drive_st_msg);
         }
 
-
-    void write_CSV_laps(string filePathAndName, string lapTime) {
-        ofstream myFile_Handler;
-        string myLine;
-
-        // File Open in the Read Mode
-        myFile_Handler.open(filePathAndName, ios::out); // TODO: Change to ios::app if I want more than one value (don't delete preious times)
-
-        if(myFile_Handler.is_open()) {
-            myFile_Handler << lapTime << endl;
-            myFile_Handler.close();
-        } else {
-            cout << "Unable to open the file! - write_CSV_laps" << endl;
-        }
-    }
-        
-    void read_CSV_points(string filePathAndName) {
-        ifstream myFile_Handler;
-        string myLine;
-
-        // File Open in the Read Mode
-        myFile_Handler.open(filePathAndName, ios::in);
-
-        if(myFile_Handler.is_open())
-        {
-            points.clear(); // reset points
-            getline(myFile_Handler, myLine); // ignore first line
-            
-            // Read each line
-            while(getline(myFile_Handler, myLine)) {
-
-                stringstream ss(myLine);
-                string x_str, y_str;
-                getline(ss, x_str, ','); // x = first column
-                getline(ss, y_str, ','); // y = second column
-
-                // remove any white space characters from x_str and y_str
-                x_str.erase(remove_if(x_str.begin(), x_str.end(), ::isspace), x_str.end());
-                y_str.erase(remove_if(y_str.begin(), y_str.end(), ::isspace), y_str.end());
-
-                // Cast to double
-                double x = std::stod(x_str);
-                double y = std::stod(y_str);
-
-                points.emplace_back(Point{x,y});
-            }
-
-            // Close File
-            myFile_Handler.close();
-        
-        } else {
-            cout << "Unable to open the file! - read_CSV_points" << endl;
-        }
-    }
-
     double round(double value, int numOfDecimalPlaces = 0) {
         int decimalDisplacement = std::pow(10, numOfDecimalPlaces);
         double temp = value * decimalDisplacement;
@@ -174,11 +126,8 @@ private:
 
     void reset_times() {
         starting_time = ros::Time::now();
-        last_lap_time = ros::Time::now();
-
-        last_passed_time = ros::Time::now();
-        meh = ros::WallTime::now();
-        meh_last_lap_time = ros::WallTime::now();
+        last_lap_time = starting_time;
+        last_passed_time = starting_time;
     }
 
 public:
@@ -187,43 +136,45 @@ public:
         n = ros::NodeHandle("~");
 
         // get topic names
-        string mydrive_drive_topic, odom_topic, scan_topic, results_topic;
+        string mydrive_drive_topic, odom_topic, scan_topic, results_topic, map_request_topic, mad_data_points_topic;
         n.getParam("mydrive_drive_topic", mydrive_drive_topic);
         n.getParam("odom_topic", odom_topic);
         n.getParam("scan_topic", scan_topic);
         n.getParam("simulation_results_topic", results_topic);
+        n.getParam("map_request_topic", map_request_topic);
+        n.getParam("mad_data_points_topic", mad_data_points_topic);
         
         // get params
         n.getParam("scan_field_of_view", scan_field_of_view);
 
         std::string ns = ros::this_node::getNamespace();    // My stuff
-        mydrive_drive_topic = ns + mydrive_drive_topic;                            // My stuff
-        odom_topic = ns + odom_topic;                            // My stuff
+        mydrive_drive_topic = ns + mydrive_drive_topic;     // My stuff
+        odom_topic = ns + odom_topic;                       // My stuff
         scan_topic = ns + scan_topic;  
-        results_topic = ns + results_topic;                            // My stuff
+        results_topic = ns + results_topic;                 // My stuff
+        map_request_topic = ns + map_request_topic;         // My stuff
+        mad_data_points_topic = ns + mad_data_points_topic; // My stuff
 
         // get car parameters
         n.getParam("max_speed", max_speed);
         n.getParam("max_steering_angle", max_steering_angle); // 0.4189 rad
         normal_speed = max_speed;
-        breaking_speed = normal_speed / 4;
+        breaking_speed = normal_speed / 6;
 
         // get PID parameters
         n.getParam("Kp", Kp);
         n.getParam("Ki", Ki);
         n.getParam("Kd", Kd);
 
-        cout << "Kp: " << Kp << ", Ki: " << Ki << ", Kd: " << Kd << endl;
-
         // set initial point and next point to go to
         //points = ppts;
-        read_CSV_points("/home/aleksander/catkin_ws/src/f1tenth_simulator/maps/temp.csv");
+        //read_CSV_points("/home/aleksander/catkin_ws/src/f1tenth_simulator/maps/temp.csv");
         //read_CSV_points("/home/aleksander/catkin_ws/src/f1tenth_simulator/maps/porto_centerline.csv");
         //read_CSV_points("/home/aleksander/catkin_ws/src/f1tenth_simulator/maps/Austin_centerline.csv");
-        ppts = points;
+        //read_CSV_points("/home/aleksander/catkin_ws/src/f1tenth_simulator/maps/IMS_centerline.csv");
+        //ppts = points;
 
-        //current_point = points.front();
-        next_point = points.front();
+        
 
         // Make a publisher for drive messages
         drive_pub = n.advertise<ackermann_msgs::AckermannDriveStamped>(mydrive_drive_topic, 10);
@@ -231,14 +182,34 @@ public:
         // Make a publisher for lap results
         results_pub = n.advertise<std_msgs::String>(results_topic, 10);
 
+        map_request_pub = n.advertise<std_msgs::String>(map_request_topic, 10);
+        std_msgs::String msg;
+        msg.data = ns + " requesting map";
+        std::this_thread::sleep_for(chrono::seconds(1));  // Wait for network connections to be established
+        map_request_pub.publish(msg);
         // Start a subscriber to listen to odom messages
         odom_sub = n.subscribe(odom_topic, 1, &MydriveWalker::odom_callback, this);
         // Start a subscriber to listen to scan messages
         scan_sub = n.subscribe(scan_topic, 1, &MydriveWalker::laser_callback, this);
-        starting_time = ros::Time::now();
-        
-        
+        map_data_sub = n.subscribe(mad_data_points_topic, 1000, &MydriveWalker::mapData_Callback, this);
+
+        reset_times();
     }
+
+    void mapData_Callback(const geometry_msgs::PoseArray::ConstPtr& msg) {
+        // Get datapoints from PoseArray message data
+        points.clear(); // reset points
+        for (const auto& pose : msg->poses) {
+            double x = pose.position.x;
+            double y = pose.position.y;
+
+            points.emplace_back(Point{x,y});
+        }
+        ppts = points;
+        map_received = true;  // set the flag
+        next_point = points.front(); // Initialise next point
+    }
+
 
 // --------------------------------------------------------------------------------------------------------------
     // Method related to and called on each laser scan call
@@ -276,6 +247,11 @@ public:
 // --------------------------------------------------------------------------------------------------------------
 
     void odom_callback(const nav_msgs::Odometry & msg) {
+        // wait for map to be received before continuing.
+        // give the map a chance to arrive
+        if (!map_received) {
+            return;
+        }
         
         // publishing is done in odom callback just so it's at the same rate as the sim
         ackermann_msgs::AckermannDriveStamped drive_st_msg;
@@ -377,9 +353,9 @@ public:
         //new_drive_angle = max(-max_steering_angle, min(max_steering_angle, new_drive_angle));
         bool isDriving = (abs(prev_pos.x - x) > 0.01 && abs(prev_pos.y - y) > 0.01);
 
-        if (!meh_tester && isDriving) {
+        if (!has_started_tester && isDriving && ppts.size() > 2) {
             reset_times();
-            meh_tester = true;
+            has_started_tester = true;
         }
 
         // Publish the new speed and steering angle

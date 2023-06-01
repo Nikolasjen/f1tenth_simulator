@@ -11,6 +11,8 @@
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Imu.h>
 #include <std_msgs/Int32MultiArray.h>
+#include <std_msgs/String.h>
+
 
 #include <sensor_msgs/LaserScan.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
@@ -129,6 +131,10 @@ private:
 
     std::string map_topic; // made map_topic a field varaible as it is used in two different scopes.
 
+    // ROS publish lap results to EVO-ALG
+    ros::Publisher results_pub;
+    
+
 public:
 
     RacecarSimulator() { // : im_server("racecar_sim")
@@ -166,6 +172,9 @@ public:
         pose_rviz_topic = ns + pose_rviz_topic;                            // My stuff
         imu_topic = ns + imu_topic;                            // My stuff
         gt_pose_topic = ns + gt_pose_topic;                            // My stuff
+        std::string results_topic;
+        n.getParam("simulation_results_topic", results_topic);
+        results_topic = ns + results_topic;                            // My stuff
 
         // Get steering delay params
         n.getParam("buffer_length", buffer_length);
@@ -230,6 +239,9 @@ public:
 
         // Make a publisher for ground truth pose
         pose_pub = n.advertise<geometry_msgs::PoseStamped>(gt_pose_topic, 1);
+
+        // Make a publisher for lap results
+        results_pub = n.advertise<std_msgs::String>(results_topic, 10);
 
         // Start a timer to output the pose
         update_pose_timer = n.createTimer(ros::Duration(update_pose_rate), &RacecarSimulator::update_pose, this);
@@ -402,6 +414,11 @@ public:
                         TTC = true;
 
                         ROS_INFO("Collision detected");
+
+                        std_msgs::String msg;
+                        double penalty_time = 9000.0;
+                        msg.data = std::to_string(penalty_time);
+                        results_pub.publish(msg);
                     }
                 }
             }
