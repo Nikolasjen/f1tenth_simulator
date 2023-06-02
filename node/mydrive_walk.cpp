@@ -36,7 +36,7 @@ private:
     ros::NodeHandle n;
 
     // car parameters
-    double max_speed, max_steering_angle;
+    double max_speed, max_steering_angle, max_decel;
 
     // Listen for odom messages
     ros::Subscriber odom_sub;
@@ -56,11 +56,11 @@ private:
     double COLLISION_DIST = 0.01;
     int collisions = 0;
     bool breaking = false;
-    double WALL_BREAK_DIST = 2.0;
-    double normal_speed = 0.0;
+    double WALL_BREAK_DIST = 7.0;
     double breaking_speed = 0.0;
+    double current_speed = 0.0;
 
-    double CHECK_BREAK_RANGE = 45/2; // degrees
+    double CHECK_BREAK_RANGE = 45/3.5; // degrees
     ros::Time starting_time;
     ros::Time last_lap_time;
 
@@ -76,9 +76,9 @@ private:
     Point prev_pos = Point{0,0};
 
     // PID controller parameters
-    double Kp = 0.5;
-    double Ki = 0.1;
-    double Kd = 0.2;
+    double Kp = 0.0;
+    double Ki = 0.0;
+    double Kd = 0.0;
     double integral = 0.0;
     double prev_error = 0.0;
 
@@ -88,7 +88,7 @@ private:
     // Read CSV file
     string csv_name = "testMapPoints.csv";
     vector<Point> points;
-    const double DISTANCE_THRESHOLD = 1.5; // distance threshold for changing to next point
+    double distance_threshold = 1.0; // distance threshold for changing to next point
     Point current_point;
     Point next_point;
 
@@ -105,7 +105,7 @@ private:
         ackermann_msgs::AckermannDrive &drive_msg,
         double new_drive_angle = 0.0
         ) {
-            // set angle (add random change to previous angle)
+            // set steering angle
             drive_msg.steering_angle = new_drive_angle;
             
             // reset previous desired angle
@@ -158,8 +158,8 @@ public:
         // get car parameters
         n.getParam("max_speed", max_speed);
         n.getParam("max_steering_angle", max_steering_angle); // 0.4189 rad
-        normal_speed = max_speed;
-        breaking_speed = normal_speed / 6;
+        n.getParam("max_decel", max_decel);
+        breaking_speed = 1.38; // m/s ~ 4.968 km/hr i.e. roughly my average walking speed ;)
 
         // get PID parameters
         n.getParam("Kp", Kp);
@@ -212,6 +212,24 @@ public:
 
 
 // --------------------------------------------------------------------------------------------------------------
+
+    double calculate_braking_distance() {
+        double target_speed = breaking_speed;
+        double decel = max_decel;
+
+        // If the current speed is already lower than the target speed, no need to brake
+        if (current_speed <= target_speed) {
+            return 0.0;
+        }
+
+        // Calculate the braking distance based on current speed and target speed
+        double braking_distance = ((current_speed * current_speed) - (target_speed * target_speed)) / (2 * decel) * 1.2;
+        if (braking_distance < 0.0) {
+            braking_distance = 0.0;
+        }
+        return braking_distance;
+    }
+
     // Method related to and called on each laser scan call
     void laser_callback(const sensor_msgs::LaserScan & msg) {
         // initialize message to be published
@@ -227,19 +245,32 @@ public:
         double shortest_distance = std::numeric_limits<double>::infinity();
         
         for (int i = (int)leftCheck; i < (int)rightCheck; i++) {
+            /*
             if (msg.ranges[i] < WALL_BREAK_DIST) {
                 shortest_distance = msg.ranges[i];
             }
+            */
+            if (msg.ranges[i] < shortest_distance) {
+                shortest_distance = msg.ranges[i];
+                
+            } 
 
             if (msg.ranges[i] < WALL_KEEPAWAY_DIST) {
                 collisions++;
             }
 
         }
-
-        if (shortest_distance < WALL_BREAK_DIST) {
+        double braking_distance = calculate_braking_distance();
+        braking_distance *= 1.12;
+        //cout << "shortest distance: " << shortest_distance << " braking_distance: " << braking_distance << endl;
+        if (braking_distance > 0.0) {
+            distance_threshold = 1.0 + 0.45 * braking_distance;
+        }
+    
+        // Apply breaks if a wall is in close proximity
+        if (shortest_distance < braking_distance || shortest_distance < 1.0) {
             breaking = true;
-            //cout << "BREAKING!" << endl;
+            
         } else {
             breaking = false;
         }
@@ -252,13 +283,17 @@ public:
         if (!map_received) {
             return;
         }
+
+        // Store current speed of the car
+        current_speed = msg.twist.twist.linear.x;
+        //cout << "current speed: " << current_speed << endl;
         
         // publishing is done in odom callback just so it's at the same rate as the sim
         ackermann_msgs::AckermannDriveStamped drive_st_msg;
         ackermann_msgs::AckermannDrive drive_msg;
 
         if (!breaking)
-            drive_msg.speed = normal_speed;
+            drive_msg.speed = max_speed;
         else
             drive_msg.speed = breaking_speed;
 
@@ -276,7 +311,7 @@ public:
         double distance_to_next_point = sqrt(dx*dx + dy*dy);
 
         // If the robot has reached the next point on the trajectory, update the current and next points
-        if (distance_to_next_point < DISTANCE_THRESHOLD) {
+        if (distance_to_next_point < distance_threshold) {
             if (points.size() > 2) {
                 points.erase(points.begin());
                 next_point = points.front();

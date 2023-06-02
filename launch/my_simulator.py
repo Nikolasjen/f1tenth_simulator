@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-
 import subprocess
 import csv
 import random as rng
@@ -23,25 +22,32 @@ POINTS_DESTINATION_CSV_FILE = "temp.csv"
 LAB_TIMES_CSV_FILE = "labs.csv"
 
 F1TENTH_PATH = rospkg.RosPack().get_path('f1tenth_simulator')
-MAP_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_map.yaml")
+#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_map.yaml")
+#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/porto.yaml")
+MAP_PATH = os.path.join(F1TENTH_PATH, "maps/levine_blocked.yaml")
 MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_centerline.csv")
+#MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/porto_centerline.csv")
+MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/levine_centerline.csv")
 PARAMS_PATH = os.path.join(F1TENTH_PATH, "params.yaml")
 TEMP_FILES_PATH = os.path.join(F1TENTH_PATH,"launch", "tmp")
 PATH_TO_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/simulator.rviz")
 PATH_TO_TEMPLATE_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/template_simulator.rviz")
 
 LIST_OF_NODE_NAMES = ["racecar_simulator", "mux_controller", "behavior_controller", "keyboard", "mydrive_walker"]
-POPULATION_SIZE = 20
+POPULATION_SIZE = 50
 MAX_RUNNING = 10
 
 results = []
 current_num_of_running_sims = 0
+gen_num_of_collisions = [] # gen 0 = index 0
+gen_num_of_errors = [] # gen 0 = index 0
+
 
 # Evolution parameters
-BEST_OUTCOME = 5.4
+#BEST_OUTCOME = 40
 MUTATION_PERCENTAGE = 0.003 # +- 0.3% mutation -> 0.6% mutation
 NUMBER_OF_INITIAL_SOLUTIONS = POPULATION_SIZE
-NUMBER_OF_GENERATIONS = 5
+NUMBER_OF_GENERATIONS = 100
 PERCENTAGE_BEST_SOLUTION = 0.2 # 20%
 solutions = [] # One set of path points = one possible solution
 best_in_each_gen = [] # (solve time, list of points)
@@ -99,7 +105,7 @@ class SimulationHandler:
                 if node.startswith('/' + self.namespace + '/'):
                     kill_node_command = "rosnode kill {}".format(node)
                     subprocess.Popen(kill_node_command.split())
-                    print("Terminated node: {}".format(node))
+                    #print("Terminated node: {}".format(node))
         except Exception as e:
             print("Error while terminating nodes: {}".format(e))
 
@@ -261,10 +267,12 @@ def find_result_from_simulation(simulation_name):
     
     return ('error', '18000.0')
 
-def write_csv_file(file_path_and_name, path_points, lapTime):    
+def write_csv_file(file_path_and_name, path_points, lapTime, gen_idx): 
+    global gen_num_of_collisions
+    global gen_num_of_errors   
     with open(file_path_and_name, 'w') as file_handler:
         csv_writer = csv.writer(file_handler)
-        csv_writer.writerow("time, {}".format(lapTime))
+        csv_writer.writerow(["time: {}, num_collisions: {}, num_errors: {}".format(lapTime, gen_num_of_collisions[gen_idx], gen_num_of_errors[gen_idx])])
         csv_writer.writerow(["x_m, y_m"]) # write path_first_line to first line
         
         # write each point as a row
@@ -310,11 +318,29 @@ def fitness(result):
         return penalty
     """
 
+def last_gens_crashed(number_of_gens_to_check):
+    global best_in_each_gen
+
+    if len(best_in_each_gen) < number_of_gens_to_check:
+        return False
+    
+    count = 0
+    for best in best_in_each_gen:
+        if best[0] >= 9000:
+            count += 1
+    
+    if count == number_of_gens_to_check:
+        return True
+    else:
+        return False
+
 # Evolutional method - genetic evolution
 def evolution():
     global results
     global solutions
     global best_in_each_gen
+    global gen_num_of_collisions
+    global gen_num_of_errors
     
     # Read path points from csv file
     original_path_points = read_csv_points()
@@ -329,9 +355,12 @@ def evolution():
     # Run initial simulations
     #run_simulations(MAX_RUNNING, POPULATION_SIZE)
 
-    # Repeat with ranked solutions
+    # Repeat with ranked solutions for each generation
     for i in range(NUMBER_OF_GENERATIONS):
+        # Initialize (or initialise?) used datasets
         rankedSolutions = []
+        gen_num_of_collisions.append(0)
+        gen_num_of_errors.append(0)
 
         # Run initial simulations
         results.clear()
@@ -344,16 +373,30 @@ def evolution():
             
             # place calculated fitness and solution in ranking
             rankedSolutions.append( (fitness(result), s_points) ) # score (time spent), follow-points
+            if (float(result[1]) == 9000):
+                gen_num_of_collisions[i] += 1
+            elif (float(result[1]) == 18000):
+                gen_num_of_errors[i] += 1
         
         rankedSolutions.sort()
         best_in_each_gen.append(rankedSolutions[0])
+        
+        # store result outide script
+        iPath = os.path.join(F1TENTH_PATH, "results", "gen{}.csv".format(i))
+        write_csv_file(iPath, rankedSolutions[0][1], rankedSolutions[0][0], i)
+        time.sleep(1) # Wait for csv finished writing
 
         print("=== Gen {} best solution === ".format(i))
         print(rankedSolutions[0][0])
 
-        # TODO: add break condition
-        #if rankedSolutions[0][0] < BEST_OUTCOME/2:
+        # TODO: Break condition - if the result is achieved
+        if (rankedSolutions[0][0] >= 9000):
+            if (last_gens_crashed(number_of_gens_to_check=3)):
+                break
+        #if rankedSolutions[0][0] < BEST_OUTCOME:
         #    break
+
+
         # Selection - choose top PERCENTAGE_BEST_SOLUTION (e.g. 20%) best solutions
         topPercent = int(NUMBER_OF_GENERATIONS*PERCENTAGE_BEST_SOLUTION)
         if topPercent < 1:
@@ -383,11 +426,10 @@ def evolution():
         # redefine solutions
         solutions = newGen
     
+
+    print("---- Best results ----")
     for i, best in enumerate(best_in_each_gen):
-        iPath = os.path.join(F1TENTH_PATH, "results", "gen{}.csv".format(i))
-        write_csv_file(iPath, best[1], best[0])
-        time.sleep(1) # Wait for csv finished writing
-        print(best[0])
+        print("gen{}: {}".format(i, best[0]))
 
 
 if __name__ == '__main__':

@@ -1,8 +1,8 @@
 # My algorithm needs these:
 ## Params for PID control
-Kp: 1.0
-Ki: 0.02
-Kd: 8.3
+Kp: 0.9
+Ki: 0.0
+Kd: 6.2
 
 simulation_results_topic: "/results"
 map_request_topic: "/map_request"
@@ -18,7 +18,7 @@ width: 0.2032 # meters
 buffer_length: 5
 
 # Limits on the speed and steering angle
-max_speed: 6. #  meters/second
+max_speed: 25. #  meters/second ~ 90 km/hr
 max_steering_angle: 0.4189 # radians
 max_accel: 7.51 # meters/second^2
 max_decel: 8.26 # meters/second^2

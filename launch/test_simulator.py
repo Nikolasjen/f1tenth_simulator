@@ -12,19 +12,27 @@ from geometry_msgs.msg import PoseArray, Pose, Point
 
 
 F1TENTH_PATH = rospkg.RosPack().get_path('f1tenth_simulator')
+
 #MAP_PATH = os.path.join(F1TENTH_PATH, "maps/porto.yaml")
-MAP_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_map.yaml")
-#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/IMS_map.yaml")
 #MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/porto_centerline.csv")
+
+MAP_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_map.yaml")
 MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_centerline.csv")
+
+#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/levine_blocked.yaml")
+#MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/levine_centerline.csv")
+
+#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/IMS_map.yaml")
+#MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/IMS_centerline.csv")
+
 PARAMS_PATH = os.path.join(F1TENTH_PATH, "params.yaml")
 TEMP_FILES_PATH = os.path.join(F1TENTH_PATH,"launch", "tmp")
 PATH_TO_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/simulator.rviz")
 PATH_TO_TEMPLATE_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/template_simulator.rviz")
 
 LIST_OF_NODE_NAMES = ["racecar_simulator", "mux_controller", "behavior_controller", "keyboard", "mydrive_walker"]
-POPULATION_SIZE = 2
-MAX_RUNNING = 3
+POPULATION_SIZE = 20
+MAX_RUNNING = 10
 
 results = []
 current_num_of_running_sims = 0
@@ -182,9 +190,9 @@ def run_simulations(max_running, numberOfSimulations):
                                           command="rosrun f1tenth_simulator mydrive_walk",
                                           environment=env))
         # More processes...
+        """
         # Start RViz for this simulation
         processes.append(run_RViz(sim, env))
-        """
         #print("running - RViz")
 
         # Start Gazebo for this simulation
