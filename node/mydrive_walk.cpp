@@ -56,7 +56,7 @@ private:
     double COLLISION_DIST = 0.01;
     int collisions = 0;
     bool breaking = false;
-    double WALL_BREAK_DIST = 2.25;
+    double WALL_BREAK_DIST = 2.0;
     double normal_speed = 0.0;
     double breaking_speed = 0.0;
 

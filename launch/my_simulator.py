@@ -3,88 +3,114 @@
 
 import subprocess
 import csv
-import random
+import random as rng
 import copy
 import time
 import os
 import sys
 import rospy
+import rospkg
+import rosgraph
 from std_msgs.msg import String
 from rosgraph_msgs.msg import Log
-from roslaunch import rosparam
+from geometry_msgs.msg import Point
+from geometry_msgs.msg import PoseArray, Pose, Point
+#from roslaunch import rosparam
 
 # Define csv file name
 ORIGINAL_CSV_FILE = "porto_centerline.csv"
 POINTS_DESTINATION_CSV_FILE = "temp.csv"
 LAB_TIMES_CSV_FILE = "labs.csv"
 
+F1TENTH_PATH = rospkg.RosPack().get_path('f1tenth_simulator')
+MAP_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_map.yaml")
+MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_centerline.csv")
+PARAMS_PATH = os.path.join(F1TENTH_PATH, "params.yaml")
+TEMP_FILES_PATH = os.path.join(F1TENTH_PATH,"launch", "tmp")
+PATH_TO_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/simulator.rviz")
+PATH_TO_TEMPLATE_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/template_simulator.rviz")
 
-path_first_line = []
+LIST_OF_NODE_NAMES = ["racecar_simulator", "mux_controller", "behavior_controller", "keyboard", "mydrive_walker"]
+POPULATION_SIZE = 20
+MAX_RUNNING = 10
+
+results = []
+current_num_of_running_sims = 0
 
 # Evolution parameters
 BEST_OUTCOME = 5.4
-MUTATION_PERCENTAGE = 0.01 # +- 1% mutation
-NUMBER_OF_INITIAL_SOLUTIONS = 2
+MUTATION_PERCENTAGE = 0.003 # +- 0.3% mutation -> 0.6% mutation
+NUMBER_OF_INITIAL_SOLUTIONS = POPULATION_SIZE
 NUMBER_OF_GENERATIONS = 5
 PERCENTAGE_BEST_SOLUTION = 0.2 # 20%
-solutions = []
+solutions = [] # One set of path points = one possible solution
+best_in_each_gen = [] # (solve time, list of points)
 
-def result_callback(msg, namespace):
-    print("Received results from {} finished with result: {}".format(namespace, msg.data))
 
-def read_csv_file(file_name):
-    script_dir = os.path.dirname(os.path.abspath(__file__))  # Get the absolute path of the directory containing this script
-    file_path = os.path.join(script_dir, '..', 'maps', file_name)  # Create the absolute file path
-    with open(file_path, 'r') as f:
-        csv_reader = csv.reader(f)
-        path_points = []
-        for i, row in enumerate(csv_reader):
-            if i == 0:
-                continue  # Skip the first line
-            point = {'x': float(row[0]), 'y': float(row[1])}
-            if len(row) > 2:
-                point['speed'] = float(row[2])
-            if len(row) > 3:
-                point['direction'] = float(row[3])
-            path_points.append(point)
-        f.close()
-    return path_points
+# ------------ LOGIC FOR RUNNING SIMULATIONS ------------ #
+class SimulationHandler:
+    def __init__(self, namespace, solutions_idx):
+        self.namespace = namespace
+        self.resultTopic = "/{}/results".format(self.namespace)
+        self.mapTopic = "/{}/map_request".format(self.namespace)
+        self.solutions_idx = solutions_idx
 
-def read_labs_times(file_name):
-    this_dir = os.path.dirname(os.path.abspath(__file__))  # Get the absolute path of the directory containing this script
-    file_path = os.path.join(this_dir, '..', file_name)  # Create the absolute file path to labs times
-    labTimes = []
+        # Start publishers that publishes
+        rospy.Subscriber(self.resultTopic, String, self.results_callback)   # Subscribe to the simulation result topic
+        rospy.Subscriber(self.mapTopic, String, self.map_request_callback)  # Subscribe to the map request topic
+        print("Subscribing to {}".format(self.namespace))
 
-    # Open file in read mode
-    with open(file_path, 'r') as file_handler:
-        my_lines = file_handler.readlines()
-        
-        # Read each line
-        for my_line in my_lines:
-            # Split line by comma
-            my_line = my_line.split(',')
-            labTime_str = my_line[0].strip()
-            
-            # Cast labTime to double
-            labTime = float(labTime_str)
-            
-            # Append labTime to labTimes list
-            labTimes.append(labTime)
-        file_handler.close()
-    return labTimes
+    def results_callback(self, msg):
+        global results
+        global current_num_of_running_sims
+        print("Received results from {} finished with result: {}".format(self.namespace, msg.data))
+        self.terminate_ros_nodes()
+        results.append((self.namespace, msg.data))
+        current_num_of_running_sims -= 1
 
-def read_csv_points(file_name):
-    this_dir = os.path.dirname(os.path.abspath(__file__))  # Get the absolute path of the directory containing this script
-    file_path = os.path.join(this_dir, '..', 'maps', file_name)  # Create the absolute file path to map points
+    def map_request_callback(self, msg):
+        #print("received map request from {}".format(self.namespace))
+        pose_array_msg = PoseArray()
+        global solutions
+        for point in solutions[self.solutions_idx]:
+            pose_msg = Pose()
+            pose_msg.position.x = point[0]  # x-coordinate
+            pose_msg.position.y = point[1]  # y-coordinate
+            # We ignore the z-coordinate and the orientation, so they will default to 0.0
+
+            pose_array_msg.poses.append(pose_msg)
+
+        # Publish the map data
+        self.map_publisher = rospy.Publisher("/{}/map_data".format(self.namespace), PoseArray, queue_size=10)
+        rospy.sleep(1)  # Wait for network connections to be established
+        self.map_publisher.publish(pose_array_msg)
+
+
+    def terminate_ros_nodes(self):
+        try:
+            print("Attempting to terminate all nodes under namespace {}".format(self.namespace))
+            nodes_list_command = "rosnode list"
+            nodes_list_process = subprocess.Popen(nodes_list_command.split(), stdout=subprocess.PIPE)
+            output, error = nodes_list_process.communicate()
+            if error:
+                print("Error while fetching node list: {}".format(error))
+                return
+            for node in output.decode().split('\n'):
+                if node.startswith('/' + self.namespace + '/'):
+                    kill_node_command = "rosnode kill {}".format(node)
+                    subprocess.Popen(kill_node_command.split())
+                    print("Terminated node: {}".format(node))
+        except Exception as e:
+            print("Error while terminating nodes: {}".format(e))
+
+def read_csv_points():
     points = []
     
     # Open file in read mode
-    with open(file_path, 'r') as file_handler:
+    with open(MAP_CENTERLINE_PATH, 'r') as file_handler:
         my_lines = file_handler.readlines()
         
         # Ignore first line
-        #path_first_line = my_lines[0]
-        #print(path_first_line)
         my_lines = my_lines[1:] # TODO: MOVE TO MUTATE FUNCTION
         
         # Read each line
@@ -106,12 +132,139 @@ def read_csv_points(file_name):
         file_handler.close()
     return points
 
-def write_csv_file(file_name, path_points):
-    this_dir = os.path.dirname(os.path.abspath(__file__))  # Get the absolute path of the directory containing this script
-    file_path = os.path.join(this_dir, '..', 'maps', file_name)  # Create the absolute file path
+def start_subprocess(name, command, environment, shell=True):
+    try:
+        this_subprocess = subprocess.Popen(command, shell=shell, env=environment)
+        #print("running - {}".format(name))
+        return this_subprocess
+    except:
+        print("FATAL ERROR WHILE STARTING {}".format(name))
+
+def run_simulations(max_running, numberOfSimulations):
+    # Define the namespaces for each simulation
+    simulations = []
+
+    for i in range(1, numberOfSimulations+1):
+        simulations.append({"namespace": "sim{}".format(i)})
+
+    # Run each simulation in a separate subprocess
+    processes = []
+    global current_num_of_running_sims
+
+    for sim in simulations:
+        # Ensure only max_running simulations at once
+        while current_num_of_running_sims >= max_running:
+            time.sleep(1) # wait a second
+        current_num_of_running_sims += 1
+
+        print("{} has started".format(sim['namespace']))
+        # Set the environment variables for the simulation
+        env = os.environ.copy()
+        env["ROS_NAMESPACE"] = sim["namespace"]
+        
+        # Load parameters on the Parameter Server
+        ## List of node names
+        for n_name in LIST_OF_NODE_NAMES:
+            param_command = "rosparam load {} /{}/{}".format(PARAMS_PATH, sim["namespace"], n_name)
+            param_process = subprocess.Popen(param_command, shell=True, env=env)
+            param_process.wait()  # Wait for the process to complete
+
+        # Start individual nodes in subprocesses
+        processes.append(load_racecar_model(sim,env))
+        
+        processes.append(start_subprocess(name="simulator",
+                                          command="rosrun f1tenth_simulator simulator",
+                                          environment=env))
+        processes.append(start_subprocess(name="mux",
+                                          command="rosrun f1tenth_simulator mux",
+                                          environment=env))
+        processes.append(start_subprocess(name="behavior controller",
+                                          command="rosrun f1tenth_simulator behavior_controller",
+                                          environment=env))
+        processes.append(start_subprocess(name="mydrive",
+                                          command="rosrun f1tenth_simulator mydrive_walk",
+                                          environment=env))
+        # Start RViz for this simulation
+        #processes.append(run_RViz(sim, env))
+
+    time.sleep(2)
+    # Wait for all simulations to finish
+    for process in processes:
+        process.wait()
+
+def create_racecar_model_urdf(env):
+    # Loading racecar_model parameters
+    RACECAR_MODEL_PARAMS_PATH = os.path.join(F1TENTH_PATH, "racecar.xacro")
+
+    # Converting xacro file to urdf and loading as parameter
+    xacro_command = "xacro {} > {}/{}.urdf".format(RACECAR_MODEL_PARAMS_PATH, TEMP_FILES_PATH, "racecar") # sim["namespace"]
+    xacro_process = subprocess.Popen(xacro_command, shell=True, env=env)
+    xacro_process.wait()
+
+def load_racecar_model(sim, env):
+    # Read the URDF from the temporary file and set it as a parameter
+    with open('{}/{}.urdf'.format(TEMP_FILES_PATH, "racecar"), 'r') as urdf_file: # sim["namespace"]
+        urdf_content = urdf_file.read()
+    param_command = "rosparam set /{}/racecar/robot_description '{}'".format(sim["namespace"], urdf_content)
+    param_process = subprocess.Popen(param_command, shell=True, env=env)
+    param_process.wait()
+
+    # After setting the robot_description parameter:
+    command_racecar_model = 'rosrun robot_state_publisher robot_state_publisher'
+    # Update the environment variable for the namespace
+    env['ROS_NAMESPACE'] = '{}/racecar'.format(sim["namespace"])
+    process_racecar_model = subprocess.Popen(command_racecar_model, shell=True, env=env)
+    # Reset the namespace after launching the robot_state_publisher node
+    env['ROS_NAMESPACE'] = sim["namespace"]
+
+    return process_racecar_model
+
+def start_roscore(master_uri):
+    # Start ROSCORE
+    env = os.environ.copy()
+    env["ROS_MASTER_URI"] = master_uri
+
+    roscore_process = subprocess.Popen("roscore -p {}".format(master_uri.split(":")[-1]), shell=True, env=env)
+    time.sleep(2)  # Give it some time to start before checking again
+    if not rosgraph.is_master_online():
+        print("ERROR: Unable to start ROS master at {}!".format(master_uri))
+        return None
+    else:
+        print("ROS master at {} started successfully.".format(master_uri))
+        
+        # Set /use_sim_time parameter
+        #process = subprocess.Popen("rosparam set /use_sim_time true", shell=True)
+        #process.wait()
+        return roscore_process
+
+def run_RViz(sim, env):
+    # Create a new RViz config file by replacing the placeholder with the namespace
+    rViz_template_file_path = os.path.join(sim['namespace'], PATH_TO_TEMPLATE_RVIZ_CONFIG_FILE)
+    with open(rViz_template_file_path, 'r') as template_file:
+        template_content = template_file.read()
+    rviz_config_content = template_content.replace('NAMESPACE_PLACEHOLDER', sim["namespace"])
+    rviz_config_path = '{}/rviz_config_{}.rviz'.format(TEMP_FILES_PATH, sim["namespace"])
+    with open(rviz_config_path, 'w') as rviz_config_file:
+        rviz_config_file.write(rviz_config_content)
+
+    # Start RViz for this simulation (sim) -- headded
+    rviz_command = 'rosrun rviz rviz -d ' + rviz_config_path
+    process_rviz = subprocess.Popen(rviz_command, shell=True, env=env)
+    return process_rviz
+
+# ------------ HELPER FUNCTION ------------ #
+def find_result_from_simulation(simulation_name):
+    global results
+    for res in results:
+        if res[0] == simulation_name:
+            return res
     
-    with open(file_path, 'w') as file_handler:
+    return ('error', '18000.0')
+
+def write_csv_file(file_path_and_name, path_points, lapTime):    
+    with open(file_path_and_name, 'w') as file_handler:
         csv_writer = csv.writer(file_handler)
+        csv_writer.writerow("time, {}".format(lapTime))
         csv_writer.writerow(["x_m, y_m"]) # write path_first_line to first line
         
         # write each point as a row
@@ -120,87 +273,33 @@ def write_csv_file(file_name, path_points):
         
         file_handler.close()
 
+# ------------ LOGIC FOR GENETIC ALGORITHM ------------ #
+
 def mutate_path_points(path_points, mutation_percentage):
     c_path_points = copy.deepcopy(path_points)
     mutated_path_points = []
     for x, y in c_path_points:
-        mutation_x = random.uniform(-mutation_percentage, mutation_percentage)
-        mutation_y = random.uniform(-mutation_percentage, mutation_percentage)
+        mutation_x = rng.uniform(-mutation_percentage, mutation_percentage)
+        mutation_y = rng.uniform(-mutation_percentage, mutation_percentage)
         mutated_path_points.append([x + x * mutation_x, y + y * mutation_y])
     return mutated_path_points
 
-def run_simulations(simulation_duration_seconds, numberOfSimulations):
-    # Launch command
-    #command = "roslaunch f1tenth_simulator headless_simulator.launch"
-    command = "roslaunch f1tenth_simulator simulator.launch"
-
-    # Define the namespaces and master URIs for each simulation
-    simulations = []
-
-    for i in range(1, numberOfSimulations+1):
-        print("simulation {} has started".format(i))
-        simulations.append({"namespace": "sim{}".format(i), 
-                            "master_uri": "http://localhost:{}".format(11311 + i)})
-
-    # List to store subscribers
-    subscribers = []
-
-    # For each simulation, create a separate subscriber
-    for sim in simulations:
-        namespace = sim["namespace"]
-        topic = "{}/simulation_results".format(namespace)
-        subscriber = rospy.Subscriber(topic, String, result_callback, callback_args=namespace)
-        subscribers.append(subscriber)
-        print("Subscribing to {}".format(sim["namespace"]))
-
-    
-    # Run each simulation in a separate subprocess
-    processes = []
-    for sim in simulations:
-        # Set the environment variables for the simulation
-        env = os.environ.copy()
-        env["ROS_NAMESPACE"] = sim["namespace"]
-        env["ROS_MASTER_URI"] = sim["master_uri"]
-        #rospy.ServiceProxy('/{}/gazebo/set_physics_properties'.format(sim["namespace"]))
-
-        print("Starting subprocess {}".format(env["ROS_MASTER_URI"]))
-        # Start the simulation in a subprocess
-        process = subprocess.Popen(command, shell=True, env=env)
-        processes.append(process)
-
-        # Wait a moment before starting the next simulation
-        time.sleep(2)
-
-    # Wait for all simulations to finish
-    for process in processes:
-        process.wait()
-
-    # Spin to keep the script alive
-    rospy.spin()
-
-    ## Use subprocess to launch the simulator file in the f1tenth_simulator package
-    #simulator_process = None
-    ##simulator_process = subprocess.Popen(['roslaunch', 'f1tenth_simulator', 'headless_simulator.launch'])
-    #time.sleep(2)  # wait for simulator to launch
-#
-    #simulator_start_time = time.time()
-    #while time.time() - simulator_start_time < simulation_duration_seconds:
-    #    time.sleep(0.1)
-#
-    ## Terminate the simulator process
-    #if (simulator_process is not None):
-    #    simulator_process.terminate()
-#
-    #time.sleep(1.0) # Sleep for 1 seconds to allow simulation to terminate
-    #
-    ### Collect times to run a lab
-    #labTimes = read_labs_times(LAB_TIMES_CSV_FILE)
-    #return labTimes[0]
-    return -1
-
 # Define evaluation / fitness function
-def fitness(labTime):
+def fitness(result):
+    """
+    Not sure what to do here... 
+    I can just use the times as a distinguisher, as I want the track with the shortest time.
+    Also, I added a penalty for colliding in the simulation 
+    - should probably be moved in here instead, but that would require
+      a boolean or something for collision instead...
+      though that could be interesting to check aswell (num of collisions per gen)... 
+      Not this time, though.
+    """
+    # if 9000, then collision... if 18000, then error when loading... otherwise, time for a single lap
+    lapTime = float(result[1]) 
+    return lapTime
 
+    """
     penalty = 200 * abs(labTime - BEST_OUTCOME)
 
     # Add penalty
@@ -209,145 +308,151 @@ def fitness(labTime):
         return BEST_OUTCOME
     else:
         return penalty
+    """
 
 # Evolutional method - genetic evolution
 def evolution():
+    global results
+    global solutions
+    global best_in_each_gen
+    
     # Read path points from csv file
-    original_path_points = read_csv_points(ORIGINAL_CSV_FILE)
+    original_path_points = read_csv_points()
+    time.sleep(2)
+
 
     ## Initial population
-    #for _ in range(NUMBER_OF_INITIAL_SOLUTIONS):
-    #        solutions.append(
-    #            mutate_path_points(original_path_points, MUTATION_PERCENTAGE)
-    #        )
+    solutions.clear()
+    for _ in range(NUMBER_OF_INITIAL_SOLUTIONS):
+        solutions.append(mutate_path_points(original_path_points, MUTATION_PERCENTAGE))
 
-    times = []
-    times.append(run_simulations(10, 2))
-    #for i in range(NUMBER_OF_GENERATIONS -1):
-    #    rankedSolutions = []
-    #    for s_points in solutions:
-    #        ## run simulation for s
-    #        # Write mutated path points to csv file
-    #        write_csv_file(POINTS_DESTINATION_CSV_FILE, s_points)
-    #        time.sleep(0.1)  # wait for CSV to be written
-#
-    #        labTime = run_simulation(BEST_OUTCOME*2)
-#
-    #        # place calculated fitness and solution in ranking
-    #        rankedSolutions.append( (fitness(labTime), s_points) )
-#
-    #    rankedSolutions.sort()
-    #    times.append(rankedSolutions[0][0])
+    # Run initial simulations
+    #run_simulations(MAX_RUNNING, POPULATION_SIZE)
 
-        #for time, coords in rankedSolutions:
-        #    times.append(time)
-        #    print(time)
+    # Repeat with ranked solutions
+    for i in range(NUMBER_OF_GENERATIONS):
+        rankedSolutions = []
 
-        #print(f"=== Gen {i} best solution === ")
-        #print(rankedSolutions[0])
-#
-        #if rankedSolutions[0][0] > BEST_OUTCOME/2:
+        # Run initial simulations
+        results.clear()
+        run_simulations(MAX_RUNNING, POPULATION_SIZE)
+
+        for sim_idx, s_points in enumerate(solutions):
+            ## run simulation for s
+            sim_number = sim_idx+1
+            result = find_result_from_simulation("sim{}".format(sim_number))
+            
+            # place calculated fitness and solution in ranking
+            rankedSolutions.append( (fitness(result), s_points) ) # score (time spent), follow-points
+        
+        rankedSolutions.sort()
+        best_in_each_gen.append(rankedSolutions[0])
+
+        print("=== Gen {} best solution === ".format(i))
+        print(rankedSolutions[0][0])
+
+        # TODO: add break condition
+        #if rankedSolutions[0][0] < BEST_OUTCOME/2:
         #    break
+        # Selection - choose top PERCENTAGE_BEST_SOLUTION (e.g. 20%) best solutions
+        topPercent = int(NUMBER_OF_GENERATIONS*PERCENTAGE_BEST_SOLUTION)
+        if topPercent < 1:
+            topPercent = 1
+
+        topPercentSolutions = rankedSolutions[:topPercent]
+        topPercentPoints = []
+        for s in topPercentSolutions:
+            # Extract parameters (x,y,z) from best solutions
+            topPercentPoints.append(s[1]) 
+
+        # Variations / crossing genes (I actually don't cross polinate, I just pick a random of the top best) + mutation
+        newGen = []
+        for _ in range(POPULATION_SIZE):
+            random_paths_points = rng.choice(topPercentPoints)
+            newGen.append(mutate_path_points(random_paths_points, MUTATION_PERCENTAGE))
+            # mutationFactor = rng.uniform(1-MUTATION_PERCENTAGE, 1+MUTATION_PERCENTAGE)
+            # p1 = rng.choice(topPercentPoints) * mutationFactor
+
+            # p1 = rng.choice(topPercentPoints) * mutationFactor
+            # p2 = rng.choice(topPercentPoints) * mutationFactor
+            # p3 = rng.choice(topPercentPoints) * mutationFactor
+
 #
-        ## Selection
-        #bestSolutions = rankedSolutions[:int(NUMBER_OF_GENERATIONS*PERCENTAGE_BEST_SOLUTION)]
+            #newGen.append( (p1, p2, p3) )
 #
-        #bestParameters = []
-        #for s in bestSolutions:
-        #    # Extract parameters (x,y,z) from best solutions
-        #    bestParameters.append(s[1][0]) # x
-        #    bestParameters.append(s[1][1]) # y
-        #    bestParameters.append(s[1][2]) # z
-#
-        ## Variations / crossing genes + mutation
-        #newGen = []
-        #
-        #for _ in range(NUMBER_OF_GENERATIONS):
-        #    mutationFactor = rng.uniform(1-(mutationPercentage/2), 1+(mutationPercentage/2))
-        #    p1 = rng.choice(bestParameters) * mutationFactor
-        #    p2 = rng.choice(bestParameters) * mutationFactor
-        #    p3 = rng.choice(bestParameters) * mutationFactor
-#
-        #    newGen.append( (p1, p2, p3) )
-#
-        ## redefine solutions
-        #solutions = newGen
-    for t in times:
-        print(t)
+        # redefine solutions
+        solutions = newGen
+    
+    for i, best in enumerate(best_in_each_gen):
+        iPath = os.path.join(F1TENTH_PATH, "results", "gen{}.csv".format(i))
+        write_csv_file(iPath, best[1], best[0])
+        time.sleep(1) # Wait for csv finished writing
+        print(best[0])
 
 
 if __name__ == '__main__':
     try:
+        # TODO: clean up launch/tmp folder.
+        # Create racecar.urdf
+        environment = os.environ.copy()
+        create_racecar_model_urdf(environment)
+        #original_points = read_csv_points()
+        #time.sleep(2)
+        # Start the initial ROS master
+        initial_roscore_process = start_roscore("http://localhost:11311")
+        time.sleep(1)
+
         # Initialize the listener node
         rospy.init_node('main_script')
 
-        # Read path points from csv file
-        #original_path_points = read_csv_points(original_csv_file)
-        
-        random.seed(0) # Set seed for consistent testing...
-        #evolution()
-        run_simulations(simulation_duration_seconds=10, numberOfSimulations=1)
- 
-        #meh = subprocess.Popen(['roslaunch', 'f1tenth_simulator', 'headless_simulator.launch'], env={"ROS_MASTER_URI": "http://localhost:{}".format(11311+1)})
-        #listOfProcesses = []
-        #for i in range(3):
-        #    listOfProcesses.append(
-        #        1
-        #    )
-        
+        # Open map
+        process_map_server = start_subprocess(name="map server",
+                                          command="rosrun map_server map_server {}".format(MAP_PATH),
+                                          environment=environment)
+        time.sleep(2)
 
-        #time.sleep(10)
-        #for p in listOfProcesses:
-        #    if (p != 1):
-        #        p.terminate()
-#
-        #meh.terminate()
+        # Initialize ResultListeners for each simulation
+        # For each simulation, create a separate subscriber
+        simulation_handlers = []
+        for i in range(1, POPULATION_SIZE+1):
+            #solutions.append(original_points) # Might be unnecessary, but meh.
+            simulation_handlers.append(SimulationHandler("sim{}".format(i), i-1))
         
+        rng.seed(0) # Set seed for consistent testing...
         
-        ## Mutate path points
-        #original_population = mutate_path_points(original_path_points, MUTATION_PERCENTAGE)
-        #mutated_path_points = original_population
-        ## Write mutated path points to csv file
-        #write_csv_file(new_csv_file, original_population)
-        #time.sleep(0.1)  # wait for CSV to be written
-#
-        ############################################################# times = []
-        ### Collect times to run a lab
-        ##labTimes = read_labs_times(lab_times_csv_file)
-        ##for lt in labTimes:
-        ##    print(lt)
-        #
-        ## Run simulation loop for 60 seconds ~1 min.
-        #start_time = time.time()
-        #while time.time() - start_time < 180:
-#
-        #    # Use subprocess to launch the simulator file in the f1tenth_simulator package
-        #    simulator_process = None
-        #    simulator_process = subprocess.Popen(['roslaunch', 'f1tenth_simulator', 'simulator.launch'])
-        #    time.sleep(2)  # wait for simulator to launch
-#
-        #    simulator_start_time = time.time()
-        #    while time.time() - simulator_start_time < 8:
-        #        time.sleep(0.1)
-#
-        #    # Terminate the simulator process
-        #    if (simulator_process is not None):
-        #        simulator_process.terminate()
-#
-        #    time.sleep(1.0) # Sleep for 1 seconds to allow simulation to terminate
-        #    
-        #    # Mutate path points
-        #    mutated_path_points = mutate_path_points(original_path_points, MUTATION_PERCENTAGE)
-#
-        #    # Write mutated path points to csv file
-        #    write_csv_file(new_csv_file, mutated_path_points)
-        #    time.sleep(0.1)  # wait for CSV to be written
-        #
-        ## Collect times to run a lab
-        #labTimes = read_labs_times(lab_times_csv_file)
-        #for lt in labTimes:
-        #    print(lt)
+        evolution()
         
+        #for res in results:
+        #    print(res)
+        
+        print("EVOLUTION COMPLETE, USE CTRL + C TO CLOSE")
+
+        # terminate map server
+        if process_map_server is not None:
+            process_map_server.terminate()
+            process_map_server.wait()
+        
+        #terminate_remaining_ros_nodes()
+
+        # Spin to keep the script alive
+        rospy.spin()
+
+        if initial_roscore_process is not None:
+            #process.wait()
+            initial_roscore_process.terminate()
+            initial_roscore_process.wait()
+
     except:
-        print("Process terminated... error in my_simulator code!")
-        pass
+        print("Process terminated... error in test_simulator code!")
+        
+        # Ensure termination of roscore and other processes
+        if initial_roscore_process is not None:
+            initial_roscore_process.terminate()
+            initial_roscore_process.wait()
+
+        if process_map_server is not None:
+            process_map_server.terminate()
+            process_map_server.wait()
+        
+        # Finally, spin to keep the script alive if needed
+        rospy.spin()

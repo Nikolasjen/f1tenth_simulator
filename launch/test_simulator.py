@@ -24,15 +24,19 @@ PATH_TO_TEMPLATE_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/template_
 
 LIST_OF_NODE_NAMES = ["racecar_simulator", "mux_controller", "behavior_controller", "keyboard", "mydrive_walker"]
 POPULATION_SIZE = 2
+MAX_RUNNING = 3
 
 results = []
+current_num_of_running_sims = 0
+solutions = [] # One set of path points = one possible solution
+
 
 class SimulationHandler:
-    def __init__(self, namespace, points):
+    def __init__(self, namespace, solutions_idx):
         self.namespace = namespace
         self.resultTopic = "/{}/results".format(self.namespace)
         self.mapTopic = "/{}/map_request".format(self.namespace)
-        self.points = points
+        self.solutions_idx = solutions_idx
 
         # Start publishers that publishes
         rospy.Subscriber(self.resultTopic, String, self.results_callback)   # Subscribe to the simulation result topic
@@ -41,15 +45,17 @@ class SimulationHandler:
 
     def results_callback(self, msg):
         global results
+        global current_num_of_running_sims
         print("Received results from {} finished with result: {}".format(self.namespace, msg.data))
         self.terminate_ros_nodes()
         results.append((self.namespace, msg.data))
+        current_num_of_running_sims -= 1
 
     def map_request_callback(self, msg):
         #print("received map request from {}".format(self.namespace))
         pose_array_msg = PoseArray()
-
-        for point in self.points:
+        global solutions
+        for point in solutions[self.solutions_idx]:
             pose_msg = Pose()
             pose_msg.position.x = point[0]  # x-coordinate
             pose_msg.position.y = point[1]  # y-coordinate
@@ -119,7 +125,8 @@ def start_subprocess(name, command, environment, shell=True):
     except:
         print("FATAL ERROR WHILE STARTING {}".format(name))
 
-def run_simulations(simulation_duration_seconds, numberOfSimulations):
+def run_simulations(max_running, numberOfSimulations):
+    global current_num_of_running_sims
     # Define the namespaces for each simulation
     simulations = []
 
@@ -128,8 +135,14 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
 
     # Run each simulation in a separate subprocess
     processes = []
+    
 
     for sim in simulations:
+        # Ensure only max_running simulations at once
+        while current_num_of_running_sims >= max_running:
+            time.sleep(1) # wait a second
+        current_num_of_running_sims += 1
+
         print("{} has started".format(sim['namespace']))
         # Set the environment variables for the simulation
         env = os.environ.copy()
@@ -169,9 +182,9 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
                                           command="rosrun f1tenth_simulator mydrive_walk",
                                           environment=env))
         # More processes...
-        """
         # Start RViz for this simulation
         processes.append(run_RViz(sim, env))
+        """
         #print("running - RViz")
 
         # Start Gazebo for this simulation
@@ -185,8 +198,7 @@ def run_simulations(simulation_duration_seconds, numberOfSimulations):
 
     time.sleep(2)
     # Wait for all simulations to finish
-    for i, process in enumerate(processes):
-        #print("waiting... {}".format(i))
+    for process in processes:
         process.wait()
 
 
@@ -195,7 +207,7 @@ def create_racecar_model_urdf(env):
     RACECAR_MODEL_PARAMS_PATH = os.path.join(F1TENTH_PATH, "racecar.xacro")
 
     # Converting xacro file to urdf and loading as parameter
-    xacro_command = "xacro --inorder {} > {}/{}.urdf".format(RACECAR_MODEL_PARAMS_PATH, TEMP_FILES_PATH, "racecar") # sim["namespace"]
+    xacro_command = "xacro {} > {}/{}.urdf".format(RACECAR_MODEL_PARAMS_PATH, TEMP_FILES_PATH, "racecar") # sim["namespace"]
     xacro_process = subprocess.Popen(xacro_command, shell=True, env=env)
     xacro_process.wait()
 
@@ -313,14 +325,15 @@ def main_function():
         process_map_server = start_subprocess(name="map server",
                                           command="rosrun map_server map_server {}".format(MAP_PATH),
                                           environment=environment)
-        time.sleep(1)
+        time.sleep(2)
         # Initialize ResultListeners for each simulation
         # For each simulation, create a separate subscriber
         simulation_handlers = []
         for i in range(1, POPULATION_SIZE+1):
-            simulation_handlers.append(SimulationHandler("sim{}".format(i), original_points))
+            solutions.append(original_points)
+            simulation_handlers.append(SimulationHandler("sim{}".format(i), i-1))
  
-        run_simulations(simulation_duration_seconds=10, numberOfSimulations=POPULATION_SIZE)
+        run_simulations(max_running=MAX_RUNNING, numberOfSimulations=POPULATION_SIZE)
 
         for res in results:
             print(res)
