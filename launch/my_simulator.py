@@ -22,12 +22,16 @@ POINTS_DESTINATION_CSV_FILE = "temp.csv"
 LAB_TIMES_CSV_FILE = "labs.csv"
 
 F1TENTH_PATH = rospkg.RosPack().get_path('f1tenth_simulator')
-#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_map.yaml")
-#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/porto.yaml")
-MAP_PATH = os.path.join(F1TENTH_PATH, "maps/levine_blocked.yaml")
+
+MAP_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_map.yaml")
 MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_centerline.csv")
+
+#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/porto.yaml")
 #MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/porto_centerline.csv")
-MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/levine_centerline.csv")
+
+#MAP_PATH = os.path.join(F1TENTH_PATH, "maps/levine_blocked.yaml")
+#MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/levine_centerline.csv")
+
 PARAMS_PATH = os.path.join(F1TENTH_PATH, "params.yaml")
 TEMP_FILES_PATH = os.path.join(F1TENTH_PATH,"launch", "tmp")
 PATH_TO_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/simulator.rviz")
