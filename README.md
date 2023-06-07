@@ -1,8 +1,6 @@
 ## This repo is based on the F1TENTH Racecar Simulator by 
-##    @kimnluong
-##    kimnluong Kim Luong
-##    @hzheng40
-##    hzheng40 Hongrui (Billy) Zheng
+###@kimnluong, kimnluong Kim Luong
+###@hzheng40, hzheng40 Hongrui (Billy) Zheng
 ## See: https://github.com/f1tenth/f1tenth_simulator
 ### Please refer to their repo for greater detail on the F1tenth simulator 
 
