@@ -13,6 +13,7 @@ from geometry_msgs.msg import PoseArray, Pose, Point
 
 F1TENTH_PATH = rospkg.RosPack().get_path('f1tenth_simulator')
 
+# --------------- YOU CAN CHOOSE FREELY BETWEEN THESE MAPS --------------- #
 #MAP_PATH = os.path.join(F1TENTH_PATH, "maps/porto.yaml")
 #MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/porto_centerline.csv")
 
@@ -25,13 +26,15 @@ MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_centerline.csv")
 #MAP_PATH = os.path.join(F1TENTH_PATH, "maps/IMS_map.yaml")
 #MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/IMS_centerline.csv")
 
+# --------------- PARAMETER DEFINITION --------------- #
 PARAMS_PATH = os.path.join(F1TENTH_PATH, "params.yaml")
 TEMP_FILES_PATH = os.path.join(F1TENTH_PATH,"launch", "tmp")
 PATH_TO_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/simulator.rviz")
 PATH_TO_TEMPLATE_RVIZ_CONFIG_FILE = os.path.join(F1TENTH_PATH, "launch/template_simulator.rviz")
 
 LIST_OF_NODE_NAMES = ["racecar_simulator", "mux_controller", "behavior_controller", "keyboard", "mydrive_walker"]
-POPULATION_SIZE = 20
+POPULATION_SIZE = 1 # Number of simulations that will run
+RUN_WITH_RVIZ = True # Set to False, if you don't want to have a visual.
 MAX_RUNNING = 10
 
 results = []
@@ -60,7 +63,7 @@ class SimulationHandler:
         current_num_of_running_sims -= 1
 
     def map_request_callback(self, msg):
-        #print("received map request from {}".format(self.namespace))
+        print("received map request from {}".format(self.namespace))
         pose_array_msg = PoseArray()
         global solutions
         for point in solutions[self.solutions_idx]:
@@ -164,16 +167,7 @@ def run_simulations(max_running, numberOfSimulations):
             param_process.wait()  # Wait for the process to complete
 
         # Start individual nodes in subprocesses
-        #print("Starting subprocess {}".format(env["ROS_MASTER_URI"]))
-
-        """
-        processes.append(start_subprocess(name="map server",
-                                          command="rosrun map_server map_server {}".format(MAP_PATH),
-                                          environment=env))
-        """
         processes.append(load_racecar_model(sim,env))
-        #print("running - racecar_model")
-
         processes.append(start_subprocess(name="simulator",
                                           command="rosrun f1tenth_simulator simulator",
                                           environment=env))
@@ -183,26 +177,12 @@ def run_simulations(max_running, numberOfSimulations):
         processes.append(start_subprocess(name="behavior controller",
                                           command="rosrun f1tenth_simulator behavior_controller",
                                           environment=env))
-        #processes.append(start_subprocess(name="keyboard",
-        #                                  command="rosrun f1tenth_simulator keyboard",
-        #                                  environment=env))
         processes.append(start_subprocess(name="mydrive",
                                           command="rosrun f1tenth_simulator mydrive_walk",
                                           environment=env))
-        # More processes...
-        """
-        # Start RViz for this simulation
-        processes.append(run_RViz(sim, env))
-        #print("running - RViz")
-
-        # Start Gazebo for this simulation
-        process_gazebo, process_load_model = run_Gazebo(sim, env)
-        processes.append(process_gazebo)
-        processes.append(process_load_model)
-        
-        # Wait a moment before starting the next simulation
-        time.sleep(5)
-        """
+        if RUN_WITH_RVIZ:
+            # Start RViz for this simulation
+            processes.append(run_RViz(sim, env))
 
     time.sleep(2)
     # Wait for all simulations to finish
@@ -290,10 +270,6 @@ def start_roscore(master_uri):
         return None
     else:
         print("ROS master at {} started successfully.".format(master_uri))
-        
-        # Set /use_sim_time parameter
-        #process = subprocess.Popen("rosparam set /use_sim_time true", shell=True)
-        #process.wait()
         return roscore_process
 
 
@@ -345,6 +321,8 @@ def main_function():
 
         for res in results:
             print(res)
+        print("SIMULATIONS COMPLETE, USE CTRL + C TO CLOSE")
+
         
         # terminate map server
         if process_map_server is not None:
