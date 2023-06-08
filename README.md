@@ -38,11 +38,11 @@ In case this does not work, please try with ```catkin_make --force-cmake``` as t
 
 To run the simulator without the evolutionary algorithm, run:
 
-    rosrun f1tenth_simulator test\_simulator.launch
+    rosrun f1tenth_simulator test_simulator.launch
 
 This will launch everything you need for a full simulation; roscore, the simulator, a preselected map, a model of the racecar and RViz.
 
-If you instead want to run the evolutionary algorithm, I suggest looking at the ```POPULATION_SIZE```, the ```MAX\_RUNNING``` and the ```NUMBER\_OF\_GENERATIONS``` parameters as these are in charge of how many how many simulations will run per generation, how many simultanious simulations will run (check what your system can handle) and how many generations will run, respectively. Remember that one simulation will not finish until the racecar either finishes a lap or collides with a wall.
+If you instead want to run the evolutionary algorithm, I suggest looking at the ```POPULATION_SIZE```, the ```MAX_RUNNING``` and the ```NUMBER_OF_GENERATIONS``` parameters as these are in charge of how many how many simulations will run per generation, how many simultanious simulations will run (check what your system can handle) and how many generations will run, respectively. Remember that one simulation will not finish until the racecar either finishes a lap or collides with a wall.
 
 Then you can run the script via:
-    rosrun f1tenth_simulator my\_simulator.launch
+    rosrun f1tenth_simulator my_simulator.launch
