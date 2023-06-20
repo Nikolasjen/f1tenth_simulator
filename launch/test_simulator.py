@@ -18,8 +18,8 @@ F1TENTH_PATH = rospkg.RosPack().get_path('f1tenth_simulator')
 #MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/porto_centerline.csv")
 
 MAP_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_map.yaml")
-#MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_centerline.csv")
-MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_new_line.csv")
+MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_centerline.csv")
+#MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/Austin_new_line.csv")
 
 #MAP_PATH = os.path.join(F1TENTH_PATH, "maps/levine_blocked.yaml")
 ##MAP_CENTERLINE_PATH = os.path.join(F1TENTH_PATH, "maps/levine_centerline.csv")
